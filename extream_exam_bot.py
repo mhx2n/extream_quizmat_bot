@@ -26,9 +26,12 @@ OWNER_ID = 8389621809
 OWNER_USERNAME = "@Your_Himus"
 
 DENY_TEXT = (
-    f"<blockquote><b> Please avoid unnecessary commands.</b></blockquote>\n "
+    
+    f"<blockquote><b> Please avoid unnecessary commands.</b></blockquote>\n"
     f"<blockquote><b>For access or permission,contact the Owner: {OWNER_USERNAME}</b></blockquote>"
+    
 )
+
 
 RIGHT_MARK = 1.0
 MAX_LEADERBOARD = 10   # গ্রুপে শীর্ষ কতজন দেখাবে
@@ -95,7 +98,10 @@ async def deny(target: Message | CallbackQuery) -> None:
     if isinstance(target, CallbackQuery):
         await target.answer(DENY_TEXT, show_alert=True)
     else:
-        await target.reply(DENY_TEXT)
+        await target.reply(
+            DENY_TEXT,
+            parse_mode=ParseMode.HTML
+            )
 
 async def owner_only(target: Message | CallbackQuery) -> bool:
     user_id = target.from_user.id
