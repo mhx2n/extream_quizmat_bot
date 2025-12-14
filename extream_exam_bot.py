@@ -20,7 +20,7 @@ from aiogram.exceptions import TelegramBadRequest
 
 # ===================== CONFIG =====================
 
-BOT_TOKEN = os.getenv("BOT_TOKEN", "8318888870:AAER2X_Z2M7I9GOiA77tY9I46XlbvsXclos")
+BOT_TOKEN = os.getenv("BOT_TOKEN", "8318888870:AAFppBRBNICTCSKp1pz6yyEWFjRn8bRnXmg")
 
 OWNER_ID = 8389621809
 OWNER_USERNAME = "@Your_Himus"
@@ -73,6 +73,7 @@ class ExamSession:
     answered: Dict[int, Set[int]] = field(default_factory=dict)  # user_id -> set(question_index)
     results: Dict[int, UserResult] = field(default_factory=dict)
     pinned_message_id: Optional[int] = None
+    task: Optional[asyncio.Task] = None
 
 # ===================== GLOBAL STATE =====================
 
@@ -81,6 +82,9 @@ router = Router()
 GLOBAL_QUESTION_BANK: List[Question] = []
 EXAM_TEMPLATE = ExamTemplate()
 EXAMS: Dict[int, ExamSession] = {}
+ANNOUNCEMENT_DATA: dict | None = None
+PENDING_QUESTIONS: List[Question] = []
+PENDING_MSG_ID: Optional[int] = None
 
 EditField = Literal["title", "time", "negative"]
 OWNER_EDIT_STATE: Optional[EditField] = None
@@ -173,6 +177,37 @@ async def cmd_start(message: Message, bot: Bot):
         parse_mode=ParseMode.HTML,
     )
 
+@router.message(Command("save_A"))
+async def cmd_save_announcement(message: Message):
+    global ANNOUNCEMENT_DATA
+
+    # Only owner
+    if not await owner_only(message):
+        return
+
+    # Only private
+    if message.chat.type != ChatType.PRIVATE:
+        await message.reply("❌ এই কমান্ড শুধু Private chat এ ব্যবহার করুন")
+        return
+
+    # Must be reply
+    if not message.reply_to_message:
+        await message.reply("❌ যে message save করতে চান, সেটার reply দিয়ে /save_A দিন")
+        return
+
+    src_msg = message.reply_to_message
+
+    ANNOUNCEMENT_DATA = {
+        "chat_id": src_msg.chat.id,
+        "message_id": src_msg.message_id,
+    }
+
+    await message.reply(
+        "✅ Announcement saved successfully\n"
+        "👉 গ্রুপে গিয়ে /Announcement দিন",
+        parse_mode=ParseMode.HTML
+    )
+
 @router.message(Command("help"))
 async def cmd_help(message: Message):
     help_text = (
@@ -184,6 +219,9 @@ async def cmd_help(message: Message):
         "👥 <b>Group Commands</b>\n"
         "/start - Exam Ready (Admin/Owner only)\n"
         "/finish - চলমান Exam শেষ করে Leaderboard দেখায়\n"
+        "📢 Announcement System\n"
+        "/save_A - (Private) Reply করে announcement save\n"
+        "/Announcement - (Group) Announcement post & pin\n"
         "▶️ Start Exam - Exam শুরু করুন (Button)\n\n"
         "📊 <b>Exam Flow</b>\n"
         "- Owner Quiz Poll পাঠালে Question Bank এ সেভ হয়\n"
@@ -214,8 +252,48 @@ async def cmd_finish(message: Message, bot: Bot):
         await message.reply("ℹ️ কোনো active exam নেই", parse_mode=ParseMode.HTML)
         return
     session.active = False
+    if session.task and not session.task.done():
+        session.task.cancel()
     await finish_exam(session, bot)
     await message.reply("✅ Exam শেষ করা হয়েছে (partial results shown)", parse_mode=ParseMode.HTML)
+
+@router.message(Command("Announcement"))
+async def cmd_announcement(message: Message, bot: Bot):
+    global ANNOUNCEMENT_DATA
+
+    # Only group
+    if message.chat.type not in {ChatType.GROUP, ChatType.SUPERGROUP}:
+        return
+
+    # Admin or owner
+    if not await admin_or_owner(message, bot):
+        return
+
+    if not ANNOUNCEMENT_DATA:
+        await bot.send_message(OWNER_ID,"❌ কোনো saved announcement নেই")
+        return
+
+    try:
+        copied = await bot.copy_message(
+            chat_id=message.chat.id,
+            from_chat_id=ANNOUNCEMENT_DATA["chat_id"],
+            message_id=ANNOUNCEMENT_DATA["message_id"],
+        )
+
+        # Silent pin
+        await bot.pin_chat_message(
+            chat_id=message.chat.id,
+            message_id=copied.message_id,
+            disable_notification=True
+        )
+
+        await bot.send_message(OWNER_ID,"📌 Announcement posted & pinned")
+
+        # Auto clear
+        ANNOUNCEMENT_DATA = None
+
+    except TelegramBadRequest as e:
+        await message.reply("❌ Announcement post করতে সমস্যা হয়েছে")
 
 # ===================== CALLBACKS =====================
 
@@ -287,12 +365,26 @@ async def cb_edit_negative(call: CallbackQuery):
 async def cb_finalize(call: CallbackQuery):
     if not await owner_only(call):
         return
-    if len(GLOBAL_QUESTION_BANK) == 0:
-        await call.message.answer("❌ Question Bank ফাঁকা। আগে প্রশ্ন যোগ করুন।", parse_mode=ParseMode.HTML)
+
+    if not PENDING_QUESTIONS:
+        await call.message.answer(
+            "❌ কোনো pending question নেই",
+            parse_mode=ParseMode.HTML
+        )
         await call.answer()
         return
+
+    GLOBAL_QUESTION_BANK.extend(PENDING_QUESTIONS)
+    PENDING_QUESTIONS.clear()
+
     EXAM_TEMPLATE.finalized = True
-    await call.message.answer("✅ Exam finalized. এখন গ্রুপে /start দিয়ে শুরু করতে পারবেন।", parse_mode=ParseMode.HTML)
+
+    await call.message.answer(
+        f"✅ Exam finalized\n"
+        f"📦 Total Questions: <b>{len(GLOBAL_QUESTION_BANK)}</b>",
+        parse_mode=ParseMode.HTML
+    )
+    PENDING_MSG_ID = None
     await call.answer()
 
 @router.callback_query(F.data == "clear_bank")
@@ -350,12 +442,12 @@ async def cb_start_exam(call: CallbackQuery, bot: Bot):
     )
     session.pinned_message_id = announced.message_id
     try:
-        await bot.pin_chat_message(chat_id=session.chat_id, message_id=announced.message_id, disable_notification=True)
+        await bot.pin_chat_message(chat_id=session.chat_id, message_id=announced.message_id)
     except TelegramBadRequest:
         pass
 
     await call.answer()
-    asyncio.create_task(run_exam(session, bot))
+    session.task = asyncio.create_task(run_exam(session, bot))
 
 # ===================== TEXT INPUT HANDLER (OWNER EDITS) =====================
 
@@ -411,7 +503,9 @@ async def handle_builder_text(message: Message):
 # ===================== POLL HANDLERS =====================
 
 @router.message(F.poll)
-async def handle_poll_save(message: Message):
+async def handle_poll_save(message: Message, bot: Bot):
+    global PENDING_MSG_ID
+
     if message.chat.type != ChatType.PRIVATE:
         return
     if not await owner_only(message):
@@ -419,10 +513,9 @@ async def handle_poll_save(message: Message):
 
     poll = message.poll
     if poll.type != "quiz" or poll.correct_option_id is None:
-        await message.answer("❌ Quiz Poll (type=quiz) এবং correct option সেট করুন", parse_mode=ParseMode.HTML)
         return
 
-    GLOBAL_QUESTION_BANK.append(
+    PENDING_QUESTIONS.append(
         Question(
             text=poll.question,
             options=[opt.text for opt in poll.options],
@@ -430,7 +523,22 @@ async def handle_poll_save(message: Message):
         )
     )
 
-    await message.answer(f"✅ Question saved | Total: <b>{len(GLOBAL_QUESTION_BANK)}</b>", parse_mode=ParseMode.HTML)
+    text = (
+        "<b>🕒 Questions Queued</b>\n"
+        f"Total: <b>{len(PENDING_QUESTIONS)}</b>\n\n"
+        "Finalize Exam চাপলে সব save হবে"
+    )
+
+    if PENDING_MSG_ID is None:
+        msg = await message.answer(text, parse_mode=ParseMode.HTML)
+        PENDING_MSG_ID = msg.message_id
+    else:
+        await message.bot.edit_message_text(
+            chat_id=message.chat.id,
+            message_id=PENDING_MSG_ID,
+            text=text,
+            parse_mode=ParseMode.HTML
+        )
 
 @router.poll_answer()
 async def handle_poll_answer(poll_answer: PollAnswer, bot: Bot):
@@ -468,6 +576,8 @@ async def handle_poll_answer(poll_answer: PollAnswer, bot: Bot):
 async def run_exam(session: ExamSession, bot: Bot):
     try:
         for idx, q in enumerate(session.questions, start=1):
+            if not session.active:
+                break
             poll_message = await bot.send_poll(
                 chat_id=session.chat_id,
                 question=f"Q{idx}. {q.text}",
