@@ -26,8 +26,8 @@ OWNER_ID = 8389621809
 OWNER_USERNAME = "@Your_Himus"
 
 DENY_TEXT = (
-    "পড়তে Boy 😒 "
-    f"অনুমতি নিতে যোগাযোগ করুন 👉 {OWNER_USERNAME}"
+    f"<blockquote><b> Please avoid unnecessary commands.</b></blockquote>\n "
+    f"<blockquote><b>For access or permission,contact the Owner: {OWNER_USERNAME}</b></blockquote>"
 )
 
 RIGHT_MARK = 1.0
@@ -55,8 +55,10 @@ class UserResult:
     username: Optional[str]
     correct: int = 0
     wrong: int = 0
+    answered: int = 0   # ✅ ADD THIS LINE
     skipped: int = 0
     score: float = 0.0
+
 
 @dataclass(slots=True)
 class ExamSession:
@@ -443,7 +445,10 @@ async def handle_poll_answer(poll_answer: PollAnswer, bot: Bot):
         answered_q = session.answered.setdefault(user.id, set())
         if q_index in answered_q:
             continue
+
         answered_q.add(q_index)
+        res.answered += 1   # ✅ ADD THIS LINE
+
 
         if poll_answer.option_ids and poll_answer.option_ids[0] == session.questions[q_index].correct_id:
             res.correct += 1
@@ -479,7 +484,7 @@ async def finish_exam(session: ExamSession, bot: Bot):
 
     # Compute skipped
     for result in session.results.values():
-        result.skipped = total_questions - (result.correct + result.wrong)
+        result.skipped = total_questions - result.answered
 
     # Sort leaderboard
     leaderboard = sorted(
