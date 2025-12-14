@@ -28,7 +28,7 @@ OWNER_USERNAME = "@Your_Himus"
 DENY_TEXT = (
     
     f"<blockquote><b> Please avoid unnecessary commands.</b></blockquote>\n"
-    f"<blockquote><b>For access or permission,contact the Owner: {OWNER_USERNAME}</b></blockquote>"
+    f"<blockquote><b>For any requirements or issues, kindly reach out to the Owner: {OWNER_USERNAME}</b></blockquote>"
     
 )
 
@@ -319,7 +319,7 @@ async def cb_start_exam(call: CallbackQuery, bot: Bot):
         return
     if call.from_user.id != OWNER_ID:
         if not await is_group_admin(bot, chat.id, call.from_user.id):
-            await deny(call)
+            await call.answer("You do not have the required permissions...........", show_alert=True)
             return
     if not EXAM_TEMPLATE.finalized:
         await call.answer("Exam finalize করা হয়নি", show_alert=True)
