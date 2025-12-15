@@ -20,7 +20,7 @@ from aiogram.exceptions import TelegramBadRequest
 
 # ===================== CONFIG =====================
 
-BOT_TOKEN = os.getenv("BOT_TOKEN", "8318888870:AAFppBRBNICTCSKp1pz6yyEWFjRn8bRnXmg")
+BOT_TOKEN = os.getenv("BOT_TOKEN", "8318888870:AAHL0n-HJZiyfruRfaGVS7NSM_xAlE6mpoA")
 
 OWNER_ID = 8389621809
 OWNER_USERNAME = "@Your_Himus"
@@ -148,22 +148,17 @@ def group_ready_menu() -> InlineKeyboardMarkup:
     ])
 
 # ===================== COMMANDS =====================
-
-@router.message(Command("start"))
-async def cmd_start(message: Message, bot: Bot):
-    # Owner inbox
-    if message.chat.type == ChatType.PRIVATE:
-        if not await owner_only(message):
-            return
-        await message.answer("📘 Exam Control Panel", reply_markup=inbox_menu(), parse_mode=ParseMode.HTML)
+@router.message(Command("startexam"))
+async def cmd_start_exam(message: Message, bot: Bot):
+    # Group only
+    if message.chat.type not in {ChatType.GROUP, ChatType.SUPERGROUP}:
         return
 
-    # Group
+    # Admin / Owner only
     if not await admin_or_owner(message, bot):
         return
 
     if not EXAM_TEMPLATE.finalized:
-        await message.reply("❌ Exam এখনও finalize করা হয়নি", parse_mode=ParseMode.HTML)
         return
 
     await message.reply(
@@ -176,6 +171,31 @@ async def cmd_start(message: Message, bot: Bot):
         reply_markup=group_ready_menu(),
         parse_mode=ParseMode.HTML,
     )
+
+
+@router.message(Command("start"))
+async def cmd_start(message: Message, bot: Bot):
+    # Private
+    if message.chat.type == ChatType.PRIVATE:
+        if not await owner_only(message):
+            return
+        await message.answer(
+            "📘 Exam Control Panel",
+            reply_markup=inbox_menu(),
+            parse_mode=ParseMode.HTML
+        )
+        return
+
+    # Group → no exam start
+    if not await admin_or_owner(message, bot):
+        return
+
+    await message.reply(
+        "ℹ️ Exam bot is ready.\n"
+        "▶️ Use /startexam to start the exam.",
+        parse_mode=ParseMode.HTML
+    )
+
 
 @router.message(Command("save_A"))
 async def cmd_save_announcement(message: Message):
@@ -223,6 +243,7 @@ async def cmd_help(message: Message):
         "/save_A - (Private) Reply করে announcement save\n"
         "/Announcement - (Group) Announcement post & pin\n"
         "▶️ Start Exam - Exam শুরু করুন (Button)\n\n"
+        "👥 Group Commands/startexam - Exam start (Admin/Owner)"
         "📊 <b>Exam Flow</b>\n"
         "- Owner Quiz Poll পাঠালে Question Bank এ সেভ হয়\n"
         "- Finalize করার পর Group এ Exam শুরু করা যায়\n"
@@ -255,7 +276,7 @@ async def cmd_finish(message: Message, bot: Bot):
     if session.task and not session.task.done():
         session.task.cancel()
     await finish_exam(session, bot)
-    await message.reply("✅ Exam শেষ করা হয়েছে (partial results shown)", parse_mode=ParseMode.HTML)
+    await message.reply("✅ The ongoing exam has been stopped.", parse_mode=ParseMode.HTML)
 
 @router.message(Command("Announcement"))
 async def cmd_announcement(message: Message, bot: Bot):
@@ -689,3 +710,4 @@ async def main() -> None:
 
 if __name__ == "__main__":
     asyncio.run(main())
+
