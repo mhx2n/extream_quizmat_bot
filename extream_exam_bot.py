@@ -20,7 +20,7 @@ from aiogram.exceptions import TelegramBadRequest, TelegramRetryAfter
 
 # ===================== CONFIG =====================
 
-BOT_TOKEN = os.getenv("BOT_TOKEN", "8318888870:AAHL0n-HJZiyfruRfaGVS7NSM_xAlE6mpoA")
+BOT_TOKEN = os.getenv("BOT_TOKEN", "8318888870:AAG_HjP0ucgmq4zDUKsXgEFjj5371LffnZI")
 
 OWNER_ID = 8389621809
 OWNER_USERNAME = "@Your_Himus"
@@ -921,4 +921,5 @@ async def main() -> None:
 
 if __name__ == "__main__":
     asyncio.run(main())
+
 
