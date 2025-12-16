@@ -16,7 +16,7 @@ from aiogram.types import (
     InlineKeyboardButton,
     ChatMember,
 )
-from aiogram.exceptions import TelegramBadRequest
+from aiogram.exceptions import TelegramBadRequest, TelegramRetryAfter
 
 # ===================== CONFIG =====================
 
@@ -49,7 +49,8 @@ class ExamTemplate:
     title: str = "Global Exam"
     time_per_question: int = 30
     negative_mark: float = 0.25
-    finalized: bool = False
+    finalized : bool = False  
+
 
 @dataclass(slots=True)
 class UserResult:
@@ -84,8 +85,14 @@ EXAM_TEMPLATE = ExamTemplate()
 EXAMS: Dict[int, ExamSession] = {}
 ANNOUNCEMENT_DATA: dict | None = None
 PENDING_QUESTIONS: List[Question] = []
-PENDING_MSG_ID: Optional[int] = None
+BUILDER_MSG_ID: Optional[int] = None
+READY_MSG_ID: Optional[int] = None
+READY_CHAT_ID: Optional[int] = None
 
+import time
+
+LAST_BUILDER_UPDATE: float = 0.0
+BUILDER_UPDATE_INTERVAL = 10.0
 EditField = Literal["title", "time", "negative"]
 OWNER_EDIT_STATE: Optional[EditField] = None
 
@@ -98,14 +105,62 @@ async def is_group_admin(bot: Bot, chat_id: int, user_id: int) -> bool:
     except TelegramBadRequest:
         return False
 
+async def safe_edit(bot, chat_id, message_id, text, reply_markup):
+    try:
+        await bot.edit_message_text(
+            chat_id=chat_id,
+            message_id=message_id,
+            text=text,
+            reply_markup=reply_markup,
+            parse_mode=ParseMode.HTML
+        )
+    except TelegramBadRequest as e:
+        if "message is not modified" in str(e):
+            pass
+        else:
+            raise
+
 async def deny(target: Message | CallbackQuery) -> None:
+    # If group & exam running → silent
+    chat_id = None
+    bot = None
+
+    if isinstance(target, Message):
+        chat_id = target.chat.id
+        bot = target.bot
+    else:
+        chat_id = target.message.chat.id
+        bot = target.message.bot
+
+    if chat_id and await exam_running_in_chat(chat_id):
+        await log_to_owner(
+            f"🚫 <b>Permission denied during exam</b>\n"
+            f"👤 {html.escape(target.from_user.full_name)}\n"
+            f"💬 Chat ID: <code>{chat_id}</code>",
+            bot
+        )
+        return
+
+    # Normal behaviour
     if isinstance(target, CallbackQuery):
         await target.answer(DENY_TEXT, show_alert=True)
     else:
-        await target.reply(
-            DENY_TEXT,
+        await target.reply(DENY_TEXT, parse_mode=ParseMode.HTML)
+
+async def exam_running_in_chat(chat_id: int) -> bool:
+    session = EXAMS.get(chat_id)
+    return bool(session and session.active)
+
+async def log_to_owner(text: str, bot: Bot):
+    try:
+        await bot.send_message(
+            OWNER_ID,
+            text,
             parse_mode=ParseMode.HTML
-            )
+        )
+    except TelegramBadRequest:
+        pass
+
 
 async def owner_only(target: Message | CallbackQuery) -> bool:
     user_id = target.from_user.id
@@ -124,23 +179,34 @@ async def admin_or_owner(message: Message, bot: Bot) -> bool:
     return False
 
 # ===================== UI BUILDERS =====================
+def builder_text():
+    return (
+        "🧩 <b>Exam Builder Panel</b>\n\n"
+        f"📘 Title: <b>{html.escape(EXAM_TEMPLATE.title)}</b>\n"
+        f"⏱ Time/Q: <b>{EXAM_TEMPLATE.time_per_question}s</b>\n"
+        f"➖ Negative: <b>-{EXAM_TEMPLATE.negative_mark}</b>\n"
+        f"📦 Questions: <b>{len(GLOBAL_QUESTION_BANK) + len(PENDING_QUESTIONS)}</b>\n"
+        f"🔒 Questions Locked: <b>{'Yes' if EXAM_TEMPLATE.finalized else 'No'}</b>"
+    )
+
 
 def inbox_menu() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="➕ Add Questions", callback_data="add_q")],
-        [InlineKeyboardButton(text="📦 Question Bank", callback_data="bank")],
-        [InlineKeyboardButton(text="🧩 Exam Builder", callback_data="builder")],
+        [InlineKeyboardButton(text="➕ Add Q & Create E", callback_data="add_q")],
     ])
 
-def builder_menu() -> InlineKeyboardMarkup:
+def builder_keyboard():
+    lock_text = "🔓 Unlock Questions" if EXAM_TEMPLATE.finalized else "🔒 Lock Questions"
+
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="✏️ Edit Title", callback_data="edit_title")],
         [InlineKeyboardButton(text="⏱ Time / Question", callback_data="edit_time")],
         [InlineKeyboardButton(text="➖ Negative Mark", callback_data="edit_negative")],
-        [InlineKeyboardButton(text="✅ Finalize Exam", callback_data="finalize")],
-        [InlineKeyboardButton(text="🗑 Clear Bank", callback_data="clear_bank")],
-        [InlineKeyboardButton(text="⬅ Back", callback_data="back")],
+        [InlineKeyboardButton(text=lock_text, callback_data="finalize")],
+        [InlineKeyboardButton(text="🗑 Clear All Data", callback_data="clear_all")],
     ])
+
+
 
 def group_ready_menu() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
@@ -151,6 +217,26 @@ def group_ready_menu() -> InlineKeyboardMarkup:
 @router.message(Command("startexam"))
 async def cmd_start_exam(message: Message, bot: Bot):
     # Group only
+    chat = message.chat
+
+    if await exam_running_in_chat(chat.id):
+        await log_to_owner(
+            f"⚠️ <b>Start Exam button pressed again</b>\n"
+            f"👤 {html.escape(message.from_user.full_name)}\n"
+            f"💬 Chat ID: <code>{chat.id}</code>",
+            bot
+        )
+        return
+
+    if await exam_running_in_chat(message.chat.id):
+        await log_to_owner(
+            f"⚠️ <b>/startexam blocked (exam running)</b>\n"
+            f"👤 {html.escape(message.from_user.full_name)}\n"
+            f"💬 Chat ID: <code>{message.chat.id}</code>",
+            bot
+        )
+        return
+
     if message.chat.type not in {ChatType.GROUP, ChatType.SUPERGROUP}:
         return
 
@@ -159,25 +245,32 @@ async def cmd_start_exam(message: Message, bot: Bot):
         return
 
     if not EXAM_TEMPLATE.finalized:
-        return
+        GLOBAL_QUESTION_BANK.extend(PENDING_QUESTIONS)
+        PENDING_QUESTIONS.clear()
+        EXAM_TEMPLATE.finalized = True
+    
 
-    await message.reply(
+
+    ready_msg =await message.reply(
         f"<blockquote>📣 <b>Exam Ready!</b></blockquote>\n"
         f"<b>{html.escape(EXAM_TEMPLATE.title)}</b>\n"
         f"<blockquote>"
-        f"Questions: <b>{len(GLOBAL_QUESTION_BANK)}</b>\n"
-        f"Time/Q: <b>{EXAM_TEMPLATE.time_per_question}s</b>"
+        f"Total Questions: <b>{len(GLOBAL_QUESTION_BANK)}</b>\n"
+        f"Time per Questio: <b>{EXAM_TEMPLATE.time_per_question}s</b>"
         f"</blockquote>",
         reply_markup=group_ready_menu(),
         parse_mode=ParseMode.HTML,
     )
-
+    global READY_MSG_ID, READY_CHAT_ID
+    READY_MSG_ID = ready_msg.message_id
+    READY_CHAT_ID = message.chat.id
 
 @router.message(Command("start"))
 async def cmd_start(message: Message, bot: Bot):
-    # Private
+
+    # Private → only owner
     if message.chat.type == ChatType.PRIVATE:
-        if not await owner_only(message):
+        if message.from_user.id != OWNER_ID:
             return
         await message.answer(
             "📘 Exam Control Panel",
@@ -186,15 +279,19 @@ async def cmd_start(message: Message, bot: Bot):
         )
         return
 
-    # Group → no exam start
-    if not await admin_or_owner(message, bot):
-        return
+    # Group
+    if message.chat.type in {ChatType.GROUP, ChatType.SUPERGROUP}:
+        # Non-admin → ignore silently
+        if not await is_group_admin(bot, message.chat.id, message.from_user.id) \
+           and message.from_user.id != OWNER_ID:
+            return
 
-    await message.reply(
-        "ℹ️ Exam bot is ready.\n"
-        "▶️ Use /startexam to start the exam.",
-        parse_mode=ParseMode.HTML
-    )
+        await message.reply(
+            "ℹ️ Exam bot is ready.\n▶️ Use /startexam to start the exam.",
+            parse_mode=ParseMode.HTML
+        )
+
+
 
 
 @router.message(Command("save_A"))
@@ -264,6 +361,15 @@ async def cmd_clear(message: Message):
 
 @router.message(Command("finish"))
 async def cmd_finish(message: Message, bot: Bot):
+    if await exam_running_in_chat(message.chat.id):
+    # finish is allowed only by admin/owner, but no group spam
+        await log_to_owner(
+            f"🛑 <b>Exam finish triggered</b>\n"
+            f"👤 {html.escape(message.from_user.full_name)}\n"
+            f"💬 Chat ID: <code>{message.chat.id}</code>",
+            bot
+        )
+
     if message.chat.type not in {ChatType.GROUP, ChatType.SUPERGROUP}:
         return
     if not await admin_or_owner(message, bot):
@@ -281,6 +387,15 @@ async def cmd_finish(message: Message, bot: Bot):
 @router.message(Command("Announcement"))
 async def cmd_announcement(message: Message, bot: Bot):
     global ANNOUNCEMENT_DATA
+    if await exam_running_in_chat(message.chat.id):
+        await log_to_owner(
+            f"⚠️ <b>/Announcement blocked (exam running)</b>\n"
+            f"👤 {html.escape(message.from_user.full_name)}\n"
+            f"💬 Chat ID: <code>{message.chat.id}</code>",
+            bot
+        )
+        return
+
 
     # Only group
     if message.chat.type not in {ChatType.GROUP, ChatType.SUPERGROUP}:
@@ -320,14 +435,42 @@ async def cmd_announcement(message: Message, bot: Bot):
 
 @router.callback_query(F.data == "add_q")
 async def cb_add_q(call: CallbackQuery):
+    global BUILDER_MSG_ID
+
     if not await owner_only(call):
         return
-    await call.message.answer(
-        "➕ Quiz Poll পাঠান (type=quiz, correct option সেট করুন)\n"
-        "প্রতি Poll সেভ হয়ে Question Bank এ যোগ হবে।",
-        parse_mode=ParseMode.HTML,
-    )
-    await call.answer()
+
+    # ✅ CASE 1: builder নেই → নতুন পাঠাও + pin
+    if BUILDER_MSG_ID is None:
+        msg = await call.message.answer(
+            builder_text(),
+            reply_markup=builder_keyboard(),
+            parse_mode=ParseMode.HTML
+        )
+        BUILDER_MSG_ID = msg.message_id
+
+        await call.message.bot.pin_chat_message(
+            chat_id=call.message.chat.id,
+            message_id=BUILDER_MSG_ID,
+            disable_notification=True
+        )
+
+    # ✅ CASE 2: builder আছে → শুধু edit
+    else:
+        try:
+            await call.message.bot.edit_message_text(
+                chat_id=call.message.chat.id,
+                message_id=BUILDER_MSG_ID,
+                text=builder_text(),
+                reply_markup=builder_keyboard(),
+                parse_mode=ParseMode.HTML
+            )
+        except TelegramBadRequest:
+            pass
+
+    await call.answer("Quiz Poll পাঠান")
+
+
 
 @router.callback_query(F.data == "bank")
 async def cb_bank(call: CallbackQuery):
@@ -340,20 +483,6 @@ async def cb_bank(call: CallbackQuery):
     )
     await call.answer()
 
-@router.callback_query(F.data == "builder")
-async def cb_builder(call: CallbackQuery):
-    if not await owner_only(call):
-        return
-    await call.message.answer(
-        "🧩 Exam Builder\n"
-        f"Title: <b>{html.escape(EXAM_TEMPLATE.title)}</b>\n"
-        f"Time/Q: <b>{EXAM_TEMPLATE.time_per_question}s</b>\n"
-        f"Negative: <b>-{EXAM_TEMPLATE.negative_mark}</b>\n"
-        f"Finalized: <b>{'Yes' if EXAM_TEMPLATE.finalized else 'No'}</b>",
-        reply_markup=builder_menu(),
-        parse_mode=ParseMode.HTML,
-    )
-    await call.answer()
 
 @router.callback_query(F.data == "edit_title")
 async def cb_edit_title(call: CallbackQuery):
@@ -361,7 +490,7 @@ async def cb_edit_title(call: CallbackQuery):
     if not await owner_only(call):
         return
     OWNER_EDIT_STATE = "title"
-    await call.message.answer("✏️ নতুন Exam Title পাঠান (৩+ অক্ষর)", parse_mode=ParseMode.HTML)
+    await call.message.answer("✏️ Please enter a new exam title ( minimum 3 characters )", parse_mode=ParseMode.HTML)
     await call.answer()
 
 @router.callback_query(F.data == "edit_time")
@@ -370,7 +499,7 @@ async def cb_edit_time(call: CallbackQuery):
     if not await owner_only(call):
         return
     OWNER_EDIT_STATE = "time"
-    await call.message.answer("⏱ প্রতি প্রশ্নের সময় (৫–৩০০ সেকেন্ড) পাঠান", parse_mode=ParseMode.HTML)
+    await call.message.answer("⏱ Enter the time per question ( 5 - 300 seconds )", parse_mode=ParseMode.HTML)
     await call.answer()
 
 @router.callback_query(F.data == "edit_negative")
@@ -379,68 +508,118 @@ async def cb_edit_negative(call: CallbackQuery):
     if not await owner_only(call):
         return
     OWNER_EDIT_STATE = "negative"
-    await call.message.answer("➖ Negative mark পাঠান (০–২, যেমন: 0.25)", parse_mode=ParseMode.HTML)
+    await call.message.answer("➖ Enter the negative mark ( 0 - 2 , e.g.: 0.25)", parse_mode=ParseMode.HTML)
     await call.answer()
 
 @router.callback_query(F.data == "finalize")
 async def cb_finalize(call: CallbackQuery):
+
+    if not await owner_only(call):
+        return
+    
+    if not EXAM_TEMPLATE.finalized:
+        GLOBAL_QUESTION_BANK.extend(PENDING_QUESTIONS)
+        PENDING_QUESTIONS.clear()
+        EXAM_TEMPLATE.finalized = True
+        await call.answer("Questions locked 🔒")
+    else:
+        EXAM_TEMPLATE.finalized = False
+        await call.answer("Questions unlocked 🔓 ")
+
+    if BUILDER_MSG_ID:
+        try:
+            await call.message.bot.edit_message_text(
+                chat_id=call.message.chat.id,
+                message_id=BUILDER_MSG_ID,
+                text=builder_text(),
+                reply_markup=builder_keyboard(),
+                parse_mode=ParseMode.HTML
+            )
+        except TelegramBadRequest:
+            pass
+
+    if not EXAM_TEMPLATE.finalized:
+        GLOBAL_QUESTION_BANK.extend(PENDING_QUESTIONS)
+        PENDING_QUESTIONS.clear()
+        EXAM_TEMPLATE.finalized = True
+
+    if BUILDER_MSG_ID:
+        try:
+            await call.message.bot.unpin_chat_message(
+                chat_id = call.message.chat.id,
+                message_id = BUILDER_MSG_ID
+            )
+        except TelegramBadRequest:
+            pass
+
+@router.callback_query(F.data == "clear_all")
+async def cb_clear_all(call: CallbackQuery):
+    global BUILDER_MSG_ID
     if not await owner_only(call):
         return
 
-    if not PENDING_QUESTIONS:
-        await call.message.answer(
-            "❌ কোনো pending question নেই",
+    GLOBAL_QUESTION_BANK.clear()
+    PENDING_QUESTIONS.clear()
+    EXAM_TEMPLATE.finalized = False
+
+    try:
+        await call.message.bot.edit_message_text(
+            chat_id=call.message.chat.id,
+            message_id=BUILDER_MSG_ID,
+            text=builder_text(),
+            reply_markup=builder_keyboard(),
             parse_mode=ParseMode.HTML
         )
-        await call.answer()
-        return
+    except TelegramBadRequest:
+        pass
 
-    GLOBAL_QUESTION_BANK.extend(PENDING_QUESTIONS)
-    PENDING_QUESTIONS.clear()
+    await call.answer("All data cleared")
 
-    EXAM_TEMPLATE.finalized = True
-
-    await call.message.answer(
-        f"✅ Exam finalized\n"
-        f"📦 Total Questions: <b>{len(GLOBAL_QUESTION_BANK)}</b>",
-        parse_mode=ParseMode.HTML
-    )
-    PENDING_MSG_ID = None
-    await call.answer()
-
-@router.callback_query(F.data == "clear_bank")
-async def cb_clear_bank(call: CallbackQuery):
-    if not await owner_only(call):
-        return
-    GLOBAL_QUESTION_BANK.clear()
-    EXAM_TEMPLATE.finalized = False
-    await call.message.answer("🗑 Question Bank ক্লিয়ার করা হয়েছে!\nনতুন Exam তৈরি করতে আবার প্রশ্ন যোগ করুন।", parse_mode=ParseMode.HTML)
-    await call.answer()
-
-@router.callback_query(F.data == "back")
-async def cb_back(call: CallbackQuery):
-    if not await owner_only(call):
-        return
-    await call.message.answer("📘 Exam Control Panel", reply_markup=inbox_menu(), parse_mode=ParseMode.HTML)
-    await call.answer()
 
 @router.callback_query(F.data == "start_exam")
 async def cb_start_exam(call: CallbackQuery, bot: Bot):
+
     chat = call.message.chat
+
+    # ✅ Group check
     if chat.type not in {ChatType.GROUP, ChatType.SUPERGROUP}:
         await call.answer("শুধু গ্রুপে চালানো যায়", show_alert=True)
         return
+
+    # ✅ Permission check FIRST
     if call.from_user.id != OWNER_ID:
         if not await is_group_admin(bot, chat.id, call.from_user.id):
-            await call.answer("You do not have the required permissions...........", show_alert=True)
+            await call.answer(
+                "❌ Access denied - Only exam administratore can start the exam 🔒",
+                show_alert=True
+            )
             return
+
+    # ✅ Exam finalized?
     if not EXAM_TEMPLATE.finalized:
-        await call.answer("Exam finalize করা হয়নি", show_alert=True)
-        return
-    if len(GLOBAL_QUESTION_BANK) == 0:
-        await call.answer("Question Bank ফাঁকা", show_alert=True)
+        await call.answer("❌ Exam finalize করা হয়নি", show_alert=True)
         return
 
+    if len(GLOBAL_QUESTION_BANK) == 0:
+        await call.answer("❌ Question Bank ফাঁকা", show_alert=True)
+        return
+
+    # 🔥 এখন safe → delete Ready message
+    try:
+        await call.message.delete()
+    except:
+        pass
+
+    global READY_MSG_ID, READY_CHAT_ID
+    if READY_MSG_ID and READY_CHAT_ID:
+        try:
+            await bot.delete_message(READY_CHAT_ID, READY_MSG_ID)
+        except:
+            pass
+        READY_MSG_ID = None
+        READY_CHAT_ID = None
+
+    # ✅ Start exam
     session = ExamSession(
         chat_id=chat.id,
         questions=list(GLOBAL_QUESTION_BANK),
@@ -453,22 +632,23 @@ async def cb_start_exam(call: CallbackQuery, bot: Bot):
         f"📌 <b>Exam Started</b>\n\n"
         f"<b>{html.escape(EXAM_TEMPLATE.title)}</b>\n\n"
         f"<blockquote>"
-        f"Total: <b>{len(session.questions)}</b>\n"
-        f"Time/Q: <b>{session.template.time_per_question}s</b>\n"
+        f"Total Questions: <b>{len(session.questions)}</b>\n"
+        f"Time per Question: <b>{session.template.time_per_question}s</b>\n"
+        f"Negative Mark: <b>{session.template.negative_mark}</b>\n"
         f"</blockquote>"
-        f"<blockquote>"
-        "সবার জন্য শুভকামনা!"
-        f"</blockquote>",
+        f"<blockquote><b>সবার জন্য শুভকামনা!</b></blockquote>",
         parse_mode=ParseMode.HTML,
     )
+
     session.pinned_message_id = announced.message_id
     try:
-        await bot.pin_chat_message(chat_id=session.chat_id, message_id=announced.message_id)
-    except TelegramBadRequest:
+        await bot.pin_chat_message(chat.id, announced.message_id)
+    except:
         pass
 
     await call.answer()
     session.task = asyncio.create_task(run_exam(session, bot))
+
 
 # ===================== TEXT INPUT HANDLER (OWNER EDITS) =====================
 
@@ -484,13 +664,23 @@ async def handle_builder_text(message: Message):
     text = message.text.strip()
 
     if OWNER_EDIT_STATE == "title":
-        if len(text) >= 3:
-            EXAM_TEMPLATE.title = text
-            OWNER_EDIT_STATE = None
-            await message.answer(f"✅ Title updated to: <b>{html.escape(text)}</b>", reply_markup=builder_menu(), parse_mode=ParseMode.HTML)
-        else:
+        if len(text) < 3:
             await message.answer("❌ Title কমপক্ষে ৩ অক্ষরের হতে হবে", parse_mode=ParseMode.HTML)
+            return
+
+        EXAM_TEMPLATE.title = text
+        OWNER_EDIT_STATE = None
+
+        if BUILDER_MSG_ID:
+            await safe_edit(
+                message.bot,
+                message.chat.id,
+                BUILDER_MSG_ID,
+                builder_text(),
+                builder_keyboard()
+            )
         return
+
 
     if OWNER_EDIT_STATE == "time":
         if text.isdigit():
@@ -498,7 +688,7 @@ async def handle_builder_text(message: Message):
             if 5 <= t <= 300:
                 EXAM_TEMPLATE.time_per_question = t
                 OWNER_EDIT_STATE = None
-                await message.answer(f"✅ Time/Q set to: <b>{t}s</b>", reply_markup=builder_menu(), parse_mode=ParseMode.HTML)
+                await message.bot.edit_message_text(chat_id=message.chat.id,message_id=BUILDER_MSG_ID,text=builder_text(),reply_markup=builder_keyboard(),parse_mode=ParseMode.HTML)
             else:
                 await message.answer("❌ Time ৫ থেকে ৩০০ সেকেন্ডের মধ্যে দিন", parse_mode=ParseMode.HTML)
         else:
@@ -511,7 +701,7 @@ async def handle_builder_text(message: Message):
             if 0 <= n <= 2:
                 EXAM_TEMPLATE.negative_mark = n
                 OWNER_EDIT_STATE = None
-                await message.answer(f"✅ Negative mark set to: <b>-{n}</b>", reply_markup=builder_menu(), parse_mode=ParseMode.HTML)
+                await message.bot.edit_message_text(chat_id=message.chat.id,message_id=BUILDER_MSG_ID,text=builder_text(),reply_markup=builder_keyboard(),parse_mode=ParseMode.HTML)
             else:
                 await message.answer("❌ Negative ০–২ এর মধ্যে দিন", parse_mode=ParseMode.HTML)
         except ValueError:
@@ -525,7 +715,9 @@ async def handle_builder_text(message: Message):
 
 @router.message(F.poll)
 async def handle_poll_save(message: Message, bot: Bot):
-    global PENDING_MSG_ID
+    
+    if EXAM_TEMPLATE.finalized:
+        return  # ❌ new quiz reject
 
     if message.chat.type != ChatType.PRIVATE:
         return
@@ -536,6 +728,10 @@ async def handle_poll_save(message: Message, bot: Bot):
     if poll.type != "quiz" or poll.correct_option_id is None:
         return
 
+    for q in PENDING_QUESTIONS:
+        if q.text == poll.question:
+            return
+        
     PENDING_QUESTIONS.append(
         Question(
             text=poll.question,
@@ -544,22 +740,23 @@ async def handle_poll_save(message: Message, bot: Bot):
         )
     )
 
-    text = (
-        "<b>🕒 Questions Queued</b>\n"
-        f"Total: <b>{len(PENDING_QUESTIONS)}</b>\n\n"
-        "Finalize Exam চাপলে সব save হবে"
-    )
+    global LAST_BUILDER_UPDATE
+    now = time.time()
 
-    if PENDING_MSG_ID is None:
-        msg = await message.answer(text, parse_mode=ParseMode.HTML)
-        PENDING_MSG_ID = msg.message_id
-    else:
-        await message.bot.edit_message_text(
-            chat_id=message.chat.id,
-            message_id=PENDING_MSG_ID,
-            text=text,
-            parse_mode=ParseMode.HTML
-        )
+    if BUILDER_MSG_ID and (now - LAST_BUILDER_UPDATE)>= BUILDER_UPDATE_INTERVAL:
+        try:
+            await bot.edit_message_text(
+                chat_id=message.chat.id,
+                message_id=BUILDER_MSG_ID,
+                text=builder_text(),
+                reply_markup=builder_keyboard(),
+                parse_mode=ParseMode.HTML
+            )
+            LAST_BUILDER_UPDATE = now
+        except TelegramRetryAfter as e:
+            await asyncio.sleep(e.retry_after)
+        except TelegramBadRequest:
+            pass
 
 @router.poll_answer()
 async def handle_poll_answer(poll_answer: PollAnswer, bot: Bot):
@@ -689,6 +886,20 @@ async def finish_exam(session: ExamSession, bot: Bot):
         except TelegramBadRequest:
             # user might not have messaged the bot
             pass
+
+    global BUILDER_MSG_ID
+
+    if BUILDER_MSG_ID:
+        try:
+            await bot.delete_message(
+            chat_id=OWNER_ID,
+            message_id=BUILDER_MSG_ID
+            )
+        except:
+            pass
+
+    BUILDER_MSG_ID = None
+
 
     # Auto-clear after exam finish
     GLOBAL_QUESTION_BANK.clear()
