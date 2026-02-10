@@ -1,3 +1,4 @@
-aiogram==3.4.1
-asyncio
-dataclasses
+beautifulsoup4==4.14.3
+pandas==3.0.0
+python-telegram-bot==22.6
+Requests==2.32.5
