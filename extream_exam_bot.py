@@ -2428,7 +2428,7 @@ def _format_user_poll_solution(
     opts = opts[:5]
 
     lines = []
-    lines.append("<b>🧩 Quiz Solution</b>")
+    lines.append("<b>📊 Quiz Solution</b>")
     lines.append(f"\n<b>Question:</b>\n{q}")
     lines.append("\n<b>Options:</b>")
     for i, o in enumerate(opts, start=1):
@@ -2871,7 +2871,7 @@ COMMANDS_REGISTRY = {
             "start": "Welcome message",
             "help": "Show detailed command guide",
             "commands": "Show all available commands (categorized)",
-            "features": "Alias for /commands",
+            #"features": "Alias for /commands",
             "ask": "Contact support (send text or reply to message/file)",
             "scanhelp": "Image→Quiz tutorial (for users with vision access)",
             "vision_on": "Enable Image→Quiz (command-based)",
@@ -3178,20 +3178,20 @@ async def cmd_ownerstats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lines.append(f"<b>👑 Owner Dashboard</b>")
     lines.append(f"⏱ Uptime: <code>{h(fmt_uptime())}</code>")
     lines.append("")
-    lines.append(f"👥 মোট ইউজার: <b>{h(total_users)}</b>")
-    lines.append(f"🛠 মোট স্টাফ (Owner+Admin): <b>{h(staff_count)}</b>")
-    lines.append(f"✅ Active (শেষ ২৪ ঘন্টা): <b>{h(active_24h)}</b>")
+    lines.append(f"👥 Total Users: <b>{h(total_users)}</b>")
+    lines.append(f"🛠 (Owner+Admin): <b>{h(staff_count)}</b>")
+    lines.append(f"✅ Active (last 24 hours): <b>{h(active_24h)}</b>")
     lines.append("")
     lines.append(f"💾 DB Size: <code>{h(fmt_mb(db_mb))}</code>")
     lines.append(f"🧠 RAM (RSS): <code>{h(fmt_mb(rss_mb))}</code>")
     lines.append("")
     if err_24h == 0:
-        lines.append("🟢 Error (২৪ ঘন্টা): <b>0</b> — আলহামদুলিল্লাহ")
+        lines.append("🟢 Error (24 hours): <b>0</b> — Chill bro 🌝")
     else:
-        lines.append(f"🔴 Error (২৪ ঘন্টা): <b>{h(err_24h)}</b>")
+        lines.append(f"🔴 Error (24 hours): <b>{h(err_24h)}</b>")
         if last_errors:
             lines.append("")
-            lines.append("<b>শেষ ৫টা Error:</b>")
+            lines.append("<b>last 5 Error:</b>")
             for r in last_errors:
                 ts = str(r["created_at"] or "")
                 ev = str(r["event"] or "")
@@ -4503,6 +4503,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
