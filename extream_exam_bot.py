@@ -6,8 +6,8 @@ from pyrogram.errors import FloodWait
 
 # ================= CONFIG =================
 API_ID = 36680379  # <-- এখানে তোমার API_ID বসাও
-API_HASH = "8200161005:AAF_bgiFj7UYVtDGddi3yAT9GW7zFQzBr_U"
-BOT_TOKEN = "8318888870:AAG_HjP0ucgmq4zDUKsXgEFjj5371LffnZI"
+API_HASH = "86bb52af9122d52bd16223114e3a52bb"
+BOT_TOKEN = "8200161005:AAF_bgiFj7UYVtDGddi3yAT9GW7zFQzBr_U"
 OWNER_ID = 8389621809  # <-- এখানে তোমার Telegram user id বসাও
 
 DB_FILE = "thumbnail_db.json"
@@ -242,6 +242,7 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main()) 
+
 
 
 
