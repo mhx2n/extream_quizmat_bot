@@ -113,7 +113,7 @@ async def apply_thumbnail(client, message):
 
 # ================= RUN =================
 print("Bot is running...")
-app.run()    )
+app.run()    
 
 # ================= SAVE THUMB =================
 
@@ -242,5 +242,6 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main()) 
+
 
 
