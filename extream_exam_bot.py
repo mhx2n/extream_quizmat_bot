@@ -1,107 +1,138 @@
 import os
+import requests
 import json
-import asyncio
-from pyrogram import Client, filters
-from pyrogram.errors import FloodWait
+import time
 
-API_ID = 36680379
-API_HASH = "86bb52af9122d52bd16223114e3a52bb"
+# ================= CONFIG =================
 BOT_TOKEN = "8200161005:AAF_bgiFj7UYVtDGddi3yAT9GW7zFQzBr_U"
 OWNER_ID = 8389621809
+
+BASE_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
+FILE_URL = f"https://api.telegram.org/file/bot{BOT_TOKEN}"
 
 TEMP = "temp"
 DB = "db.json"
 
 os.makedirs(TEMP, exist_ok=True)
 
-app = Client("bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
+pending_files = {}
 
-pending = {}
-
+# ================= DB =================
 def load_db():
     if not os.path.exists(DB):
         return {}
-    return json.load(open(DB))
+    with open(DB, "r") as f:
+        return json.load(f)
 
 def save_db(data):
-    json.dump(data, open(DB, "w"))
+    with open(DB, "w") as f:
+        json.dump(data, f)
+
+def set_thumb(file_path):
+    data = load_db()
+    data["thumb"] = file_path
+    save_db(data)
 
 def get_thumb():
     return load_db().get("thumb")
 
-def set_thumb(path):
-    data = load_db()
-    data["thumb"] = path
-    save_db(data)
+# ================= TELEGRAM HELPERS =================
+def send_message(chat_id, text):
+    requests.post(f"{BASE_URL}/sendMessage", json={
+        "chat_id": chat_id,
+        "text": text
+    })
 
-def owner_only(func):
-    async def wrapper(client, message):
-        if message.from_user.id != OWNER_ID:
-            return
-        try:
-            await func(client, message)
-        except FloodWait as e:
-            await asyncio.sleep(e.value)
-            await func(client, message)
-        except Exception as e:
-            print("ERROR:", e)
-            await message.reply(f"❌ {e}")
-    return wrapper
+def send_document(chat_id, file_path, thumb_path):
+    with open(file_path, "rb") as doc, open(thumb_path, "rb") as thumb:
+        requests.post(f"{BASE_URL}/sendDocument", data={
+            "chat_id": chat_id,
+            "caption": "✅ Done"
+        }, files={
+            "document": doc,
+            "thumbnail": thumb
+        })
 
-@app.on_message(filters.command("start") & filters.private)
-@owner_only
-async def start(client, message):
-    await message.reply("Send Photo → Save Thumbnail\nSend File → Rename")
+def get_file_path(file_id):
+    r = requests.get(f"{BASE_URL}/getFile?file_id={file_id}").json()
+    return r["result"]["file_path"]
 
-@app.on_message(filters.photo & filters.private)
-@owner_only
-async def save_thumb(client, message):
-    path = await message.download(f"{TEMP}/thumb.jpg")
-    set_thumb(path)
-    await message.reply("✅ Thumbnail Saved")
+def download_file(file_id, save_as):
+    file_path = get_file_path(file_id)
+    file_url = f"{FILE_URL}/{file_path}"
+    r = requests.get(file_url)
+    with open(save_as, "wb") as f:
+        f.write(r.content)
 
-@app.on_message(filters.document & filters.private)
-@owner_only
-async def get_file(client, message):
-
-    thumb = get_thumb()
-    if not thumb:
-        return await message.reply("❌ Set thumbnail first")
-
-    file_path = await message.download(TEMP)
-    pending[message.from_user.id] = file_path
-
-    await message.reply("✏️ Now send new file name (only text)")
-
-@app.on_message(filters.text & filters.private & ~filters.command(["start"]))
-@owner_only
-async def rename_file(client, message):
-
-    user_id = message.from_user.id
-
-    if user_id not in pending:
-        return
-
-    old_path = pending[user_id]
-    new_name = message.text.strip()
-
-    ext = os.path.splitext(old_path)[1]
-    new_path = f"{TEMP}/{new_name}{ext}"
-
-    os.rename(old_path, new_path)
-
-    thumb = get_thumb()
-
-    await message.reply("📤 Uploading...")
-
-    await message.reply_document(
-        document=new_path,
-        thumb=thumb,
-        caption="✅ Done"
-    )
-
-    os.remove(new_path)
-    del pending[user_id]
+# ================= MAIN LOOP =================
+offset = None
 
 print("Bot Running...")
-app.run()
+
+while True:
+    try:
+        updates = requests.get(f"{BASE_URL}/getUpdates", params={
+            "timeout": 30,
+            "offset": offset
+        }).json()
+
+        for update in updates["result"]:
+            offset = update["update_id"] + 1
+
+            if "message" not in update:
+                continue
+
+            message = update["message"]
+            chat_id = message["chat"]["id"]
+
+            if chat_id != OWNER_ID:
+                continue
+
+            # PHOTO → SAVE THUMB
+            if "photo" in message:
+                file_id = message["photo"][-1]["file_id"]
+                thumb_path = f"{TEMP}/thumb.jpg"
+                download_file(file_id, thumb_path)
+                set_thumb(thumb_path)
+                send_message(chat_id, "✅ Thumbnail Saved")
+
+            # DOCUMENT → ASK RENAME
+            elif "document" in message:
+                file_id = message["document"]["file_id"]
+                file_name = message["document"]["file_name"]
+
+                ext = os.path.splitext(file_name)[1]
+                save_path = f"{TEMP}/original{ext}"
+
+                download_file(file_id, save_path)
+
+                pending_files[chat_id] = save_path
+                send_message(chat_id, "✏️ Send new file name (without extension)")
+
+            # TEXT → RENAME PROCESS
+            elif "text" in message:
+                text = message["text"]
+
+                if chat_id in pending_files:
+                    old_path = pending_files[chat_id]
+                    ext = os.path.splitext(old_path)[1]
+                    new_path = f"{TEMP}/{text}{ext}"
+
+                    os.rename(old_path, new_path)
+
+                    thumb = get_thumb()
+                    if not thumb:
+                        send_message(chat_id, "❌ No thumbnail set.")
+                        continue
+
+                    send_message(chat_id, "📤 Uploading...")
+
+                    send_document(chat_id, new_path, thumb)
+
+                    os.remove(new_path)
+                    del pending_files[chat_id]
+
+    except Exception as e:
+        print("ERROR:", e)
+
+    time.sleep(1)
