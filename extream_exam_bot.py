@@ -98,32 +98,40 @@ async def del_thumb(client, message):
     await message.reply("🗑 Thumbnail Deleted Successfully!")
 
 # ================== RENAME + APPLY ==================
+pending_files = {}
+
 @app.on_message(filters.document & filters.private)
 @owner_only
-async def rename_file(client, message):
+async def receive_file(client, message):
 
     thumb_id = get_thumb()
     if not thumb_id:
         return await message.reply("❌ No thumbnail set. Send a photo first.")
 
+    file_path = await message.download(file_name=TEMP_FOLDER)
+    pending_files[message.from_user.id] = file_path
+
     await message.reply("✏️ Send new file name (without extension):")
 
-    try:
-        name_msg = await client.listen(message.chat.id, timeout=60)
-    except:
-        return await message.reply("⏰ Time expired. Send file again.")
 
-    new_name = name_msg.text.strip()
+@app.on_message(filters.text & filters.private)
+@owner_only
+async def process_rename(client, message):
 
-    # Download original file
-    original_path = await message.download(file_name=TEMP_FOLDER)
+    user_id = message.from_user.id
+
+    if user_id not in pending_files:
+        return
+
+    original_path = pending_files[user_id]
+    new_name = message.text.strip()
 
     ext = os.path.splitext(original_path)[1]
     new_file_path = os.path.join(TEMP_FOLDER, f"{new_name}{ext}")
 
     os.rename(original_path, new_file_path)
 
-    # Download thumbnail locally
+    thumb_id = get_thumb()
     thumb_path = await client.download_media(thumb_id)
 
     try:
@@ -132,17 +140,18 @@ async def rename_file(client, message):
             thumb=thumb_path,
             caption="✅ Renamed & Thumbnail Applied"
         )
-        await message.delete()
     except Exception as e:
         await message.reply(f"❌ Upload Failed:\n{e}")
 
-    # Cleanup
     try:
         os.remove(new_file_path)
         os.remove(thumb_path)
     except:
         pass
 
+    del pending_files[user_id]
+
 # ================== RUN ==================
 print("Bot is running...")
 app.run()
+
