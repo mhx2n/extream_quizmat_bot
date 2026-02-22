@@ -4,23 +4,26 @@ import asyncio
 from pyrogram import Client, filters
 from pyrogram.errors import FloodWait
 
-# ================= CONFIG =================
-API_ID = 36680379  # <-- এখানে তোমার API_ID বসাও
-API_HASH = "86bb52af9122d52bd16223114e3a52bb"
-BOT_TOKEN = "8200161005:AAF_bgiFj7UYVtDGddi3yAT9GW7zFQzBr_U"
-OWNER_ID = 8389621809  # <-- এখানে তোমার Telegram user id বসাও
+# ================== CONFIG ==================
+API_ID = 36680379  # <-- my.telegram.org থেকে
+API_HASH = "86bb52af9122d52bd16223114e3a52bb"  # <-- my.telegram.org থেকে
+BOT_TOKEN = "8200161005:AAF_bgiFj7UYVtDGddi3yAT9GW7zFQzBr_U"  # <-- BotFather থেকে
+OWNER_ID = 8389621809  # <-- তোমার Telegram user id
 
 DB_FILE = "thumbnail_db.json"
+TEMP_FOLDER = "downloads"
 
-# ================= APP =================
+os.makedirs(TEMP_FOLDER, exist_ok=True)
+
+# ================== APP ==================
 app = Client(
-    "thumbnail_bot",
+    "rename_thumb_bot",
     api_id=API_ID,
     api_hash=API_HASH,
     bot_token=BOT_TOKEN
 )
 
-# ================= DATABASE =================
+# ================== DATABASE ==================
 def load_db():
     if not os.path.exists(DB_FILE):
         return {}
@@ -32,8 +35,7 @@ def save_db(data):
         json.dump(data, f)
 
 def get_thumb():
-    data = load_db()
-    return data.get("thumbnail")
+    return load_db().get("thumbnail")
 
 def set_thumb(file_id):
     data = load_db()
@@ -45,34 +47,33 @@ def delete_thumb():
     data.pop("thumbnail", None)
     save_db(data)
 
-# ================= OWNER CHECK =================
+# ================== OWNER CHECK ==================
 def owner_only(func):
     async def wrapper(client, message):
-        if message.from_user.id != OWNER_ID:
-            return await message.reply("❌ You are not allowed to use this bot.")
+        if not message.from_user or message.from_user.id != OWNER_ID:
+            return
         try:
             await func(client, message)
         except FloodWait as e:
             await asyncio.sleep(e.value)
             await func(client, message)
         except Exception as e:
-            await message.reply(f"⚠️ Error: {e}")
+            await message.reply(f"⚠️ Error:\n{e}")
     return wrapper
 
-# ================= COMMANDS =================
-
+# ================== START ==================
 @app.on_message(filters.command("start") & filters.private)
 @owner_only
 async def start(client, message):
     await message.reply(
-        "✅ Thumbnail Bot Ready!\n\n"
-        "📌 Send a photo to set thumbnail.\n"
-        "📌 Send video/document to auto apply thumbnail.\n\n"
-        "Commands:\n"
-        "/viewthumb - View current thumbnail\n"
+        "🔥 Rename + Thumbnail Bot Ready!\n\n"
+        "📌 Send Photo → Set Thumbnail\n"
+        "📌 Send Document → Rename + Apply Thumbnail\n\n"
+        "/viewthumb - View thumbnail\n"
         "/delthumb - Delete thumbnail"
     )
 
+# ================== SAVE THUMB ==================
 @app.on_message(filters.photo & filters.private)
 @owner_only
 async def save_thumbnail(client, message):
@@ -80,6 +81,7 @@ async def save_thumbnail(client, message):
     set_thumb(file_id)
     await message.reply("✅ Thumbnail Saved Successfully!")
 
+# ================== VIEW THUMB ==================
 @app.on_message(filters.command("viewthumb") & filters.private)
 @owner_only
 async def view_thumb(client, message):
@@ -88,161 +90,59 @@ async def view_thumb(client, message):
         return await message.reply("❌ No thumbnail set.")
     await message.reply_photo(thumb, caption="📌 Current Thumbnail")
 
+# ================== DELETE THUMB ==================
 @app.on_message(filters.command("delthumb") & filters.private)
 @owner_only
 async def del_thumb(client, message):
     delete_thumb()
     await message.reply("🗑 Thumbnail Deleted Successfully!")
 
-@app.on_message((filters.video | filters.document) & filters.private)
+# ================== RENAME + APPLY ==================
+@app.on_message(filters.document & filters.private)
 @owner_only
-async def apply_thumbnail(client, message):
-    thumb = get_thumb()
-    if not thumb:
+async def rename_file(client, message):
+
+    thumb_id = get_thumb()
+    if not thumb_id:
         return await message.reply("❌ No thumbnail set. Send a photo first.")
+
+    await message.reply("✏️ Send new file name (without extension):")
+
+    try:
+        name_msg = await client.listen(message.chat.id, timeout=60)
+    except:
+        return await message.reply("⏰ Time expired. Send file again.")
+
+    new_name = name_msg.text.strip()
+
+    # Download original file
+    original_path = await message.download(file_name=TEMP_FOLDER)
+
+    ext = os.path.splitext(original_path)[1]
+    new_file_path = os.path.join(TEMP_FOLDER, f"{new_name}{ext}")
+
+    os.rename(original_path, new_file_path)
+
+    # Download thumbnail locally
+    thumb_path = await client.download_media(thumb_id)
 
     try:
         await message.reply_document(
-            document=message.document.file_id if message.document else message.video.file_id,
-            thumb=thumb,
-            caption=message.caption or ""
+            document=new_file_path,
+            thumb=thumb_path,
+            caption="✅ Renamed & Thumbnail Applied"
         )
         await message.delete()
     except Exception as e:
-        await message.reply(f"⚠️ Failed to apply thumbnail:\n{e}")
+        await message.reply(f"❌ Upload Failed:\n{e}")
 
-# ================= RUN =================
+    # Cleanup
+    try:
+        os.remove(new_file_path)
+        os.remove(thumb_path)
+    except:
+        pass
+
+# ================== RUN ==================
 print("Bot is running...")
-app.run()    
-
-# ================= SAVE THUMB =================
-
-@dp.message(F.photo)
-async def save_thumb(message: Message):
-    path = f"thumbs/{message.from_user.id}.jpg"
-    await bot.download(message.photo[-1], destination=path)
-
-    img = Image.open(path).convert("RGB")
-    img.save(path, "JPEG")
-
-    await message.answer("✅ Thumbnail Saved")
-
-# ================= RECEIVE PDF =================
-
-@dp.message(F.document)
-async def receive_pdf(message: Message, state: FSMContext):
-    if message.document.file_size > MAX_FILE_SIZE:
-        await message.answer("⚠️ File too large (max 20MB).")
-        return
-
-    if not message.document.file_name.lower().endswith(".pdf"):
-        await message.answer("⚠️ Only PDF supported.")
-        return
-
-    user_id = message.from_user.id
-
-    if not await check_force_join(user_id):
-        await message.answer("❌ Join required channel.")
-        return
-
-    thumb_path = f"thumbs/{user_id}.jpg"
-    if not os.path.exists(thumb_path):
-        await message.answer("⚠️ Send thumbnail first.")
-        return
-
-    file_path = f"files/{message.document.file_id}.pdf"
-    await bot.download(message.document, destination=file_path)
-
-    await state.update_data(file_path=file_path)
-    await message.answer("✏️ Send new file name:")
-    await state.set_state(RenameState.waiting_name)
-
-# ================= COVER INJECTION =================
-
-@dp.message(RenameState.waiting_name)
-async def inject_cover(message: Message, state: FSMContext):
-    async with LOCK:  # concurrency safe
-        user_id = message.from_user.id
-        ACTIVE_USERS.add(user_id)
-
-        data = await state.get_data()
-        original_pdf = data["file_path"]
-
-        new_name = safe_name(message.text.strip())
-        if not new_name.lower().endswith(".pdf"):
-            new_name += ".pdf"
-
-        new_path = f"files/{new_name}"
-        thumb_path = f"thumbs/{user_id}.jpg"
-
-        try:
-            original = fitz.open(original_pdf)
-            new_pdf = fitz.open()
-
-            img = fitz.open(thumb_path)
-            rect = img[0].rect
-
-            cover = new_pdf.new_page(width=rect.width, height=rect.height)
-            cover.insert_image(rect, filename=thumb_path)
-
-            new_pdf.insert_pdf(original)
-            new_pdf.save(new_path)
-
-            new_pdf.close()
-            original.close()
-
-        except Exception as e:
-            await message.answer("❌ PDF processing failed.")
-            ACTIVE_USERS.remove(user_id)
-            return
-
-        await message.answer_document(
-            document=FSInputFile(new_path),
-            caption="✅ Done Successfully!"
-        )
-
-        async with aiosqlite.connect("bot.db") as db:
-            await db.execute("UPDATE stats SET total = total + 1")
-            await db.commit()
-
-        try:
-            os.remove(original_pdf)
-            os.remove(new_path)
-        except:
-            pass
-
-        ACTIVE_USERS.remove(user_id)
-        await state.clear()
-
-# ================= OWNER PANEL =================
-
-@dp.message(Command("stats"))
-async def stats(message: Message):
-    if message.from_user.id != OWNER_ID:
-        return
-
-    async with aiosqlite.connect("bot.db") as db:
-        async with db.execute("SELECT COUNT(*) FROM users") as cur:
-            users = (await cur.fetchone())[0]
-        async with db.execute("SELECT total FROM stats") as cur:
-            total = (await cur.fetchone())[0]
-
-    await message.answer(
-        f"👥 Users: {users}\n"
-        f"📂 Files Processed: {total}\n"
-        f"⚡ Active Now: {len(ACTIVE_USERS)}"
-    )
-
-# ================= MAIN =================
-
-async def main():
-    await init_db()
-    asyncio.create_task(auto_cleanup())
-    await dp.start_polling(bot)
-
-if __name__ == "__main__":
-    asyncio.run(main()) 
-
-
-
-
+app.run()
