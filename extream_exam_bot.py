@@ -4,34 +4,27 @@ import asyncio
 from pyrogram import Client, filters
 from pyrogram.errors import FloodWait
 
-# ============== CONFIG ==============
 API_ID = 36680379
 API_HASH = "86bb52af9122d52bd16223114e3a52bb"
 BOT_TOKEN = "8200161005:AAF_bgiFj7UYVtDGddi3yAT9GW7zFQzBr_U"
 OWNER_ID = 8389621809
 
-DB_FILE = "db.json"
-TEMP_FOLDER = "temp"
+TEMP = "temp"
+DB = "db.json"
 
-os.makedirs(TEMP_FOLDER, exist_ok=True)
+os.makedirs(TEMP, exist_ok=True)
 
-app = Client(
-    "rename_bot",
-    api_id=API_ID,
-    api_hash=API_HASH,
-    bot_token=BOT_TOKEN
-)
+app = Client("bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
-# ============== DB ==============
+pending = {}
+
 def load_db():
-    if not os.path.exists(DB_FILE):
+    if not os.path.exists(DB):
         return {}
-    with open(DB_FILE, "r") as f:
-        return json.load(f)
+    return json.load(open(DB))
 
 def save_db(data):
-    with open(DB_FILE, "w") as f:
-        json.dump(data, f)
+    json.dump(data, open(DB, "w"))
 
 def get_thumb():
     return load_db().get("thumb")
@@ -41,10 +34,9 @@ def set_thumb(path):
     data["thumb"] = path
     save_db(data)
 
-# ============== OWNER CHECK ==============
 def owner_only(func):
     async def wrapper(client, message):
-        if not message.from_user or message.from_user.id != OWNER_ID:
+        if message.from_user.id != OWNER_ID:
             return
         try:
             await func(client, message)
@@ -53,47 +45,37 @@ def owner_only(func):
             await func(client, message)
         except Exception as e:
             print("ERROR:", e)
-            await message.reply(f"❌ Error:\n{e}")
+            await message.reply(f"❌ {e}")
     return wrapper
 
-# ============== START ==============
 @app.on_message(filters.command("start") & filters.private)
 @owner_only
 async def start(client, message):
-    await message.reply(
-        "🔥 Rename + Thumbnail Bot Ready!\n\n"
-        "1️⃣ Send Photo → Save Thumbnail\n"
-        "2️⃣ Send File → Rename + Apply Thumbnail"
-    )
+    await message.reply("Send Photo → Save Thumbnail\nSend File → Rename")
 
-# ============== SAVE THUMB ==============
 @app.on_message(filters.photo & filters.private)
 @owner_only
 async def save_thumb(client, message):
-    thumb_path = await message.download(file_name=f"{TEMP_FOLDER}/thumb.jpg")
-    set_thumb(thumb_path)
+    path = await message.download(f"{TEMP}/thumb.jpg")
+    set_thumb(path)
     await message.reply("✅ Thumbnail Saved")
-
-# ============== RENAME + APPLY ==============
-pending = {}
 
 @app.on_message(filters.document & filters.private)
 @owner_only
-async def receive_file(client, message):
+async def get_file(client, message):
 
     thumb = get_thumb()
-    if not thumb or not os.path.exists(thumb):
-        return await message.reply("❌ Set thumbnail first.")
+    if not thumb:
+        return await message.reply("❌ Set thumbnail first")
 
-    file_path = await message.download(file_name=TEMP_FOLDER)
+    file_path = await message.download(TEMP)
     pending[message.from_user.id] = file_path
 
-    await message.reply("✏️ Send new file name (without extension):")
+    await message.reply("✏️ Now send new file name (only text)")
 
-
-@app.on_message(filters.text & filters.private)
+@app.on_message(filters.text & filters.private & ~filters.command(["start"]))
 @owner_only
-async def rename_process(client, message):
+async def rename_file(client, message):
 
     user_id = message.from_user.id
 
@@ -104,30 +86,22 @@ async def rename_process(client, message):
     new_name = message.text.strip()
 
     ext = os.path.splitext(old_path)[1]
-    new_path = os.path.join(TEMP_FOLDER, f"{new_name}{ext}")
+    new_path = f"{TEMP}/{new_name}{ext}"
 
     os.rename(old_path, new_path)
 
     thumb = get_thumb()
 
-    try:
-        await message.reply_document(
-            document=new_path,
-            thumb=thumb,
-            caption="✅ Renamed & Thumbnail Added"
-        )
-    except Exception as e:
-        print("UPLOAD ERROR:", e)
-        await message.reply("❌ Upload failed.")
-        return
+    await message.reply("📤 Uploading...")
 
-    try:
-        os.remove(new_path)
-    except:
-        pass
+    await message.reply_document(
+        document=new_path,
+        thumb=thumb,
+        caption="✅ Done"
+    )
 
+    os.remove(new_path)
     del pending[user_id]
 
-# ============== RUN ==============
-print("Bot running...")
+print("Bot Running...")
 app.run()
