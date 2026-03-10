@@ -64,7 +64,7 @@ from telegram.ext import (
 # =========================================================
 # ✅ HARD-CODED CONFIG
 # =========================================================
-BOT_TOKEN = "8427023407:AAFagu6UcMGJAI2_jJksQTZ0P_Hj9JQTWrI"  # set in Pella Env Vars
+BOT_TOKEN = "8286585007:AAHz1NIOXIbkBATy9qdcrQtHNr0DauL325U"  # set in Pella Env Vars
 OWNER_ID = 8389621809  # your Telegram numeric user id
 
 OWNER_CONTACT = "@Your_Himus"
@@ -4771,6 +4771,82 @@ async def cmd_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await context.bot.send_document(chat_id=update.effective_user.id, document=rf, filename='probaho_users.csv', caption='All started users')
     with contextlib.suppress(Exception):
         os.unlink(path)
+
+
+def _required_join_kb() -> InlineKeyboardMarkup:
+    rows = []
+    for r in required_chat_list():
+        title = str(r["title"] or r["chat_id"])
+        cid = int(r["chat_id"])
+        url = None
+        try:
+            if title.startswith("@"):
+                url = f"https://t.me/{title.lstrip('@')}"
+        except Exception:
+            url = None
+        if url:
+            rows.append([InlineKeyboardButton(f"Join {title}", url=url)])
+    rows.append([InlineKeyboardButton("Verify", callback_data="req:verify")])
+    return InlineKeyboardMarkup(rows)
+
+
+async def on_required_verify_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not update.callback_query:
+        return
+    q = update.callback_query
+    uid = q.from_user.id if q.from_user else 0
+    if not uid:
+        with contextlib.suppress(Exception):
+            await q.answer("User not found.", show_alert=True)
+        return
+    if is_owner(uid) or is_admin(uid):
+        with contextlib.suppress(Exception):
+            await q.answer("Verified.", show_alert=False)
+        return
+
+    ok, missing = await user_meets_required_memberships(context, uid)
+    if ok:
+        reset_warn_count(uid)
+        with contextlib.suppress(Exception):
+            await q.answer("Verification successful.", show_alert=True)
+        with contextlib.suppress(Exception):
+            if q.message:
+                await q.message.delete()
+        try:
+            chat = q.message.chat_id if q.message else uid
+            body_html = (
+                f"<b>Your Role:</b> <code>{h(get_role(uid))}</code>"
+                f"\n\nUse <code>/help</code> for commands or <code>/commands</code> for a quick list."
+            )
+            msg = ui_box_html(f"Welcome to {BOT_BRAND}", body_html, emoji="👋")
+            await safe_send_text(context.bot, chat, msg)
+        except Exception:
+            pass
+        return
+
+    count = inc_warn_count(uid)
+    if count >= 5:
+        set_ban(uid, True)
+        audit_ban(OWNER_ID, uid, "BAN")
+        with contextlib.suppress(Exception):
+            await q.answer("You are banned for repeated membership violations.", show_alert=True)
+        with contextlib.suppress(Exception):
+            if q.message:
+                await q.message.edit_text(
+                    f"🚫 You are banned from {BOT_BRAND}. Contact: {OWNER_CONTACT}"
+                )
+        return
+
+    names = ", ".join(missing[:10]) if missing else "required channel/group"
+    with contextlib.suppress(Exception):
+        await q.answer(f"Still missing: {names}", show_alert=True)
+    with contextlib.suppress(Exception):
+        if q.message:
+            await q.message.edit_text(
+                f"⚠️ Please join required chats first.\n\nMissing: {names}\nWarning: {count}/5",
+                reply_markup=_required_join_kb()
+            )
+
 def build_app() -> Application:
     db_init()
     builder = ApplicationBuilder().token(BOT_TOKEN)
