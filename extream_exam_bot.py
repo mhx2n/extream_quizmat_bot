@@ -624,7 +624,14 @@ async def on_solver_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
             else:
                 answer = "Unknown model"
 
-            msg_html = h(answer)
+            if is_admin(uid) or is_owner(uid):
+                src_text = problem_text
+                if looks_like_programming_request(src_text) or looks_like_programming_request(answer):
+                    msg_html = f"<pre>{h(answer)}</pre>"
+                else:
+                    msg_html = h(answer)
+            else:
+                msg_html = h(answer)
             kb = _verify_kb(token, model, "text")
 
         with contextlib.suppress(Exception):
@@ -838,6 +845,16 @@ def to_int(s: str) -> Optional[int]:
         return int(str(s).strip())
     except Exception:
         return None
+
+
+def looks_like_programming_request(text: str) -> bool:
+    s = (text or "").lower()
+    keys = [
+        "python", "javascript", "js", "java", "c++", "cpp", "c#", "php", "sql", "html", "css",
+        "program", "code", "bug", "error", "traceback", "exception", "api", "function", "class",
+        "loop", "array", "dict", "json", "regex", "algorithm", "query", "database", "telegram bot"
+    ]
+    return any(k in s for k in keys)
 
 
 # ---------------------------
@@ -1912,6 +1929,30 @@ def reply_text_or_caption(update: Update) -> str:
         return ""
     m = update.message.reply_to_message
     return (m.text or m.caption or "").strip()
+
+
+def parse_ticket_id_from_any_message(msg) -> Optional[int]:
+    if not msg:
+        return None
+    text = "\n".join([
+        str(getattr(msg, "text", "") or ""),
+        str(getattr(msg, "caption", "") or ""),
+    ]).strip()
+    if not text:
+        return None
+    patterns = [
+        r"(?:^|\n)\s*Ticket\s*[:#-]\s*(\d+)",
+        r"(?:^|\n)\s*Ticket ID\s*[:#-]\s*(\d+)",
+        r"/reply\s+(\d+)(?:\s|$)",
+    ]
+    for pat in patterns:
+        m = re.search(pat, text, re.IGNORECASE)
+        if m:
+            try:
+                return int(m.group(1))
+            except Exception:
+                return None
+    return None
 
 
 # ---------------------------
@@ -3138,18 +3179,15 @@ COMMANDS_REGISTRY = {
     "public": {
         "description": "👤 User Commands",
         "commands": {
-            "start": "Welcome message",
+            "start": "Welcome / membership check",
             "help": "Show detailed command guide",
-            "commands": "Show all available commands (categorized)",
-            #"features": "Alias for /commands",
-            "ask": "Contact support (send text or reply to message/file)",
-            "scanhelp": "Image→Quiz tutorial (for users with vision access)",
-            "vision_on": "Enable Image→Quiz (command-based)",
-            "vision_off": "Disable Image→Quiz",
-            "solve_on": "Enable problem-solving chat (users)",
-            "solve_off": "Disable problem-solving chat (users)",
-            "explain_on": "Enable explanations when posting quizzes (staff)",
-            "explain_off": "Disable explanations (post quiz only)",
+            "commands": "Show all available commands",
+            "ask": "Contact support (text or reply to file/photo)",
+            "solve_on": "Enable user AI solving",
+            "solve_off": "Disable user AI solving",
+            "scanhelp": "Image→Quiz tutorial (if vision granted)",
+            "vision_on": "Enable Image→Quiz mode",
+            "vision_off": "Disable Image→Quiz mode"
         }
     },
     "workflow": {
@@ -3171,19 +3209,29 @@ COMMANDS_REGISTRY = {
             "done": "Export CSV + JSON, clear buffer",
             "clear": "Clear buffer without exporting",
             "addchannel": "Add a target channel",
-            "listchannels": "List channels (yours or all if granted)",
+            "listchannels": "List channels (visible scope)",
             "removechannel": "Remove a channel",
-            "setprefix": "Set channel prefix text",
+            "setprefix": "Set channel prefix",
             "setexplink": "Set explanation link",
             "post": "Post buffered quizzes to channel",
+            "postemoji": "Post buffered emoji quizzes to channel",
             "broadcast": "Send message to all users",
             "adminpanel": "View posting leaderboard",
             "reply": "Reply to support ticket",
             "close": "Close support ticket",
             "ban": "Ban a user",
             "unban": "Unban a user",
-            "banned": "List banned users",
-            "private_send": "Send protected content (no forward/save)",
+            "banned": "Show ban log / banned users",
+            "private_send": "Send private message to a user",
+            "send_private": "Alias of /private_send",
+            "himusai_on": "Enable admin/owner inbox AI-only mode",
+            "himusai_off": "Disable admin/owner inbox AI-only mode",
+            "probaho_on": "Enable user AI in current group",
+            "probaho_off": "Disable user AI in current group",
+            "explain_on": "Enable explanation in quiz/csv/json exports",
+            "explain_off": "Disable explanation in quiz/csv/json exports",
+            "quizprefix": "Set global generated-quiz prefix",
+            "quizlink": "Set global generated-quiz link"
         }
     },
     "owner": {
@@ -3237,6 +3285,9 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ensure_user(update)
     uid = update.effective_user.id
 
+    if not await enforce_required_memberships(update, context):
+        return
+
     if is_banned(uid):
         await err(update, "Access Denied", f"You are banned.\n\nContact: {OWNER_CONTACT}")
         return
@@ -3250,6 +3301,9 @@ async def cmd_commands(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Show all available commands in a categorized list."""
     ensure_user(update)
     uid = update.effective_user.id
+
+    if not await enforce_required_memberships(update, context):
+        return
 
     if is_banned(uid):
         await err(update, "Access Denied", f"You are banned.\n\nContact: {OWNER_CONTACT}")
@@ -3677,7 +3731,7 @@ async def cmd_done(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # overwrite
         rr = dict(r)
         rr["questions"] = q2.strip()
-        rr["explanation"] = e.strip()
+        rr["explanation"] = (e.strip() if explain_mode_on(uid) else "")
         norm_rows.append(rr)
     rows = norm_rows
     df = pd.DataFrame(rows)
@@ -4181,6 +4235,8 @@ async def cmd_private_send(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_ask(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ensure_user(update)
     uid = update.effective_user.id
+    if not await enforce_required_memberships(update, context):
+        return
     if is_banned(uid):
         await err(update, "Access Denied", f"You are banned.\nContact: {OWNER_CONTACT}")
         return
@@ -4241,16 +4297,21 @@ async def cmd_ask(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
     /reply <ticket_id> <message>
-    OR reply to any message and run: /reply <ticket_id>
+    OR reply to any support message/card and run /reply <message>
     Supports text + media/files/photos (by replying).
     """
-    if not context.args or not context.args[0].isdigit():
-        await safe_reply(update, usage_box("reply", "<ticket_id> [message]", "Reply to support ticket (or reply to message/file/photo)"))
-        return
-
-    tid = int(context.args[0])
-    text = " ".join(context.args[1:]).strip()
     replied = update.message.reply_to_message if update.message else None
+    tid = None
+    text = ""
+    if context.args and str(context.args[0]).isdigit():
+        tid = int(context.args[0])
+        text = " ".join(context.args[1:]).strip()
+    else:
+        tid = parse_ticket_id_from_any_message(replied)
+        text = " ".join(context.args).strip()
+    if not tid:
+        await safe_reply(update, usage_box("reply", "<ticket_id> [message]", "Reply to support ticket (or reply to support card/media)"))
+        return
 
     if not text:
         text = reply_text_or_caption(update)
@@ -4398,8 +4459,11 @@ async def cmd_banned(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
     Admin/Owner: any plain text (non-command) gets parsed into buffer.
+    In private chat, if HimusAI mode is ON for admin/owner, buffering is skipped.
     """
     uid = update.effective_user.id
+    if is_private_chat(update) and get_role(uid) in (ROLE_ADMIN, ROLE_OWNER) and solver_mode_on(uid):
+        return
     text = update.message.text or ""
     if not text.strip():
         return
@@ -4687,6 +4751,26 @@ async def on_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
 # ---------------------------
 # BUILD APP
 # ---------------------------
+
+
+@require_owner
+async def cmd_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    conn = db_connect(); cur = conn.cursor()
+    cur.execute("SELECT user_id, role, first_name, username, is_banned, created_at, last_seen_at FROM users ORDER BY created_at ASC")
+    rows = [dict(r) for r in cur.fetchall()]
+    conn.close()
+    if not rows:
+        await warn(update, "No Users", "No users found.")
+        return
+    import csv, tempfile
+    with tempfile.NamedTemporaryFile('w', suffix='.csv', delete=False, encoding='utf-8-sig', newline='') as f:
+        w = csv.DictWriter(f, fieldnames=['user_id','role','first_name','username','is_banned','created_at','last_seen_at'])
+        w.writeheader(); w.writerows(rows)
+        path = f.name
+    with open(path, 'rb') as rf:
+        await context.bot.send_document(chat_id=update.effective_user.id, document=rf, filename='probaho_users.csv', caption='All started users')
+    with contextlib.suppress(Exception):
+        os.unlink(path)
 def build_app() -> Application:
     db_init()
     builder = ApplicationBuilder().token(BOT_TOKEN)
@@ -4725,6 +4809,7 @@ def build_app() -> Application:
 
     # Owner dashboard
     app.add_handler(CommandHandler("ownerstats", cmd_ownerstats))
+    app.add_handler(CommandHandler("users", cmd_users))
 
     # Admin/Owner
     app.add_handler(CommandHandler("filter", cmd_filter))
@@ -4981,6 +5066,13 @@ def emoji_quiz_has_answered(quiz_id: str, user_id: int) -> bool:
     return bool(row)
 
 
+def emoji_quiz_user_choice(quiz_id: str, user_id: int) -> int:
+    conn = db_connect(); cur = conn.cursor()
+    cur.execute("SELECT selected_option FROM emoji_quiz_responses WHERE quiz_id=? AND user_id=?", (str(quiz_id), int(user_id)))
+    row = cur.fetchone(); conn.close()
+    return int(row["selected_option"] or 0) if row else 0
+
+
 def emoji_quiz_record_answer(quiz_id: str, user_id: int, selected_option: int, is_correct: bool) -> None:
     conn = db_connect(); cur = conn.cursor()
     cur.execute(
@@ -5233,6 +5325,8 @@ async def cmd_done(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_ask(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ensure_user(update)
     uid = update.effective_user.id
+    if not await enforce_required_memberships(update, context):
+        return
     if is_banned(uid):
         await err(update, "Access Denied", f"You are banned.\nContact: {OWNER_CONTACT}")
         return
@@ -5483,6 +5577,7 @@ def build_app() -> Application:
     app.add_handler(CallbackQueryHandler(on_solver_callback, pattern=r"^solve:"))
     app.add_handler(CallbackQueryHandler(on_genquiz_callback, pattern=r"^genquiz:"))
     app.add_handler(CallbackQueryHandler(on_emoji_quiz_callback, pattern=r"^eq:"))
+    app.add_handler(CallbackQueryHandler(on_required_verify_callback, pattern=r"^req:verify$"))
     app.add_handler(CommandHandler("ask", cmd_ask))
     app.add_handler(CommandHandler("scanhelp", cmd_scanhelp))
     app.add_handler(CommandHandler("vision_on", cmd_vision_on))
@@ -5507,6 +5602,7 @@ def build_app() -> Application:
     app.add_handler(CommandHandler("delrequired", cmd_delrequired))
     app.add_handler(CommandHandler("listrequired", cmd_listrequired))
     app.add_handler(CommandHandler("ownerstats", cmd_ownerstats))
+    app.add_handler(CommandHandler("users", cmd_users))
     app.add_handler(CommandHandler("filter", cmd_filter))
     app.add_handler(CommandHandler("done", cmd_done))
     app.add_handler(CommandHandler("clear", cmd_clear))
