@@ -1325,6 +1325,23 @@ def set_solver_mode_on(user_id: int, value: bool) -> None:
     conn.close()
 
 
+
+
+def himusai_mode_on(user_id: int) -> bool:
+    """Alias for admin/owner inbox AI-only mode.
+
+    Historical builds used a separate HimusAI toggle name, but the current
+    database stores this state in users.solver_mode_on. Keeping this alias
+    prevents NameError in the active handlers and restores the previous flow
+    where private admin/owner chats skip poll/text buffering when HimusAI is on.
+    """
+    return solver_mode_on(user_id)
+
+
+def set_himusai_mode_on(user_id: int, value: bool) -> None:
+    """Persist HimusAI mode using the existing solver_mode_on column."""
+    set_solver_mode_on(user_id, value)
+
 def explain_mode_on(user_id: int) -> bool:
     """Command-based toggle: if ON, quizzes include explanation; if OFF, quizzes are posted without explanation."""
     conn = db_connect()
@@ -5224,7 +5241,7 @@ async def cmd_himusai_on(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_private_chat(update):
         await warn(update, "Private Only", "This command works in inbox/private chat only.")
         return
-    set_solver_mode_on(update.effective_user.id, True)
+    set_himusai_mode_on(update.effective_user.id, True)
     await ok_html(update, "HimusAI Enabled", "Admin/Owner inbox auto-response enabled.", emoji="🧠")
 
 
@@ -5233,7 +5250,7 @@ async def cmd_himusai_off(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_private_chat(update):
         await warn(update, "Private Only", "This command works in inbox/private chat only.")
         return
-    set_solver_mode_on(update.effective_user.id, False)
+    set_himusai_mode_on(update.effective_user.id, False)
     await ok_html(update, "HimusAI Disabled", "Admin/Owner inbox auto-response disabled.", emoji="🧠")
 
 
@@ -8487,4 +8504,3 @@ def build_app() -> Application:
 
 if __name__ == "__main__":
     main()
-
