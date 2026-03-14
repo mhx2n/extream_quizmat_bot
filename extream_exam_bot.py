@@ -3729,6 +3729,69 @@ async def cmd_clear(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 @require_admin
+
+
+async def on_image_react_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Fallback callback for image reaction quizzes.
+
+    Some builds register an image-specific callback handler using the pattern
+    ``imgreact:<quiz_id>:<selected>``. Earlier code paths reuse the normal
+    emoji-quiz keyboard and never emit this callback. To keep startup robust and
+    avoid NameError crashes, this handler gracefully supports the image callback
+    format and stores the answer in the same emoji_quizzes tables.
+    """
+    if not update.callback_query:
+        return
+    q = update.callback_query
+    data = (q.data or '').strip()
+    m = re.match(r'^imgreact:([0-9a-f]{6,16}):(\d+)$', data)
+    if not m:
+        return
+    quiz_id = m.group(1)
+    selected = int(m.group(2))
+    uid = q.from_user.id if q.from_user else 0
+    if not uid:
+        return
+    quiz = emoji_quiz_get(quiz_id)
+    if not quiz:
+        await q.answer('Quiz expired or not found.', show_alert=True)
+        return
+    if emoji_quiz_has_answered(quiz_id, uid):
+        prev = emoji_quiz_user_choice(quiz_id, uid)
+        counts = emoji_quiz_counts(quiz_id)
+        expl = str(quiz.get('explanation', '') or '').strip()
+        if expl:
+            expl = clean_latex(expl)
+        stat_parts = []
+        for i in range(1, 5):
+            stat_parts.append(f"{EMOJI_BUTTONS[i-1]}={counts.get(i,0)}")
+        msg = f"You already answered: {EMOJI_BUTTONS[max(0, prev-1)] if 1 <= prev <= 4 else '-'}\n"
+        correct = int(quiz.get('correct_answer', 0) or 0)
+        if correct > 0:
+            msg += f"Correct: {EMOJI_BUTTONS[max(0, correct-1)]}\n"
+        msg += ' | '.join(stat_parts)
+        if expl:
+            msg += f"\n\n{expl}"
+        await q.answer(msg[:180], show_alert=True)
+        return
+    correct = int(quiz.get('correct_answer', 0) or 0)
+    is_correct = (selected == correct and correct > 0)
+    emoji_quiz_record_answer(quiz_id, uid, selected, is_correct)
+    counts = emoji_quiz_counts(quiz_id)
+    expl = str(quiz.get('explanation', '') or '').strip()
+    if expl:
+        expl = clean_latex(expl)
+    stat_parts = []
+    for i in range(1, 5):
+        stat_parts.append(f"{EMOJI_BUTTONS[i-1]}={counts.get(i,0)}")
+    if is_correct:
+        msg = '🎉 Congratulations!'
+    else:
+        msg = f"❌ Wrong\n✅ Correct: {EMOJI_BUTTONS[max(0, correct-1)] if correct > 0 else '?'}"
+    msg += f"\n{' | '.join(stat_parts)}"
+    if expl:
+        msg += f"\n\n{expl}"
+    await q.answer(msg[:180], show_alert=True)
 async def cmd_done(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     items = buffer_list(uid, limit=99999)
