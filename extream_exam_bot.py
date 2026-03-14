@@ -29,6 +29,10 @@ import datetime as dt
 import json
 import logging
 from multiprocessing import context
+
+import threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
+
 import os
 import re
 import sqlite3
@@ -137,6 +141,30 @@ if not BOT_TOKEN:
     raise SystemExit("Please set BOT_TOKEN inside the code first.")
 if not isinstance(OWNER_ID, int) or OWNER_ID <= 0:
     raise SystemExit("Please set OWNER_ID (numeric) inside the code first.")
+
+
+# =========================================================
+# Render Free Web Service Health Server
+# =========================================================
+def _run_render_health_server():
+    port = int(os.getenv("PORT", "10000"))
+
+    class _HealthHandler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200)
+            self.send_header("Content-Type", "text/plain; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(b"OK")
+
+        def log_message(self, format, *args):
+            return
+
+    try:
+        server = HTTPServer(("0.0.0.0", port), _HealthHandler)
+        server.serve_forever()
+    except Exception as e:
+        logging.exception("Health server failed: %s", e)
+
 
 # ---------------------------
 # LOGGING
@@ -8141,6 +8169,13 @@ def build_app() -> Application:
 
 def main():
     app = build_app()
+    # Render free web service port binding
+    try:
+        threading.Thread(target=_run_render_health_server, daemon=True).start()
+    except Exception:
+        logging.exception("Failed to start Render health server")
+
+  
     try:
         # Attempt to reconfigure stdout to UTF-8 encoding for Windows compatibility
         if hasattr(sys.stdout, 'reconfigure'):
