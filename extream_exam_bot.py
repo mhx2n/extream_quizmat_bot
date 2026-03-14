@@ -64,7 +64,7 @@ from telegram.ext import (
 # =========================================================
 # ✅ HARD-CODED CONFIG
 # =========================================================
-BOT_TOKEN = "8427023407:AAFagu6UcMGJAI2_jJksQTZ0P_Hj9JQTWrI"  # set in Pella Env Vars
+BOT_TOKEN = "8286585007:AAHz1NIOXIbkBATy9qdcrQtHNr0DauL325U"  # set in Pella Env Vars
 OWNER_ID = 8389621809  # your Telegram numeric user id
 
 OWNER_CONTACT = "@Your_Himus"
@@ -636,6 +636,8 @@ async def on_solver_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
         with contextlib.suppress(Exception):
             await q.edit_message_text(msg_html, reply_markup=kb, parse_mode=ParseMode.HTML, disable_web_page_preview=True)
+        if q.message and getattr(q.message.chat, "type", "") in ("group", "supergroup"):
+            asyncio.create_task(_auto_delete_after(context.bot, q.message.chat_id, [q.message.message_id], 300))
 
     except Exception as e:
         db_log("ERROR", "solver_callback_failed", {"user_id": uid, "model": model, "error": str(e)})
@@ -4830,6 +4832,14 @@ async def on_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
     db_log("ERROR", "unhandled_exception", {"error": str(context.error)})
 
 
+def _cmdh(command, callback, *args, **kwargs):
+    """CommandHandler wrapper that supports both /command and .command."""
+    try:
+        return CommandHandler(command, callback, *args, prefixes=("/", "."), **kwargs)
+    except TypeError:
+        return CommandHandler(command, callback, *args, **kwargs)
+
+
 # ---------------------------
 # BUILD APP
 # ---------------------------
@@ -4940,59 +4950,59 @@ def build_app() -> Application:
     app = builder.build()
 
     # Public
-    app.add_handler(CommandHandler("start", cmd_start))
-    app.add_handler(CommandHandler("help", cmd_help))
-    app.add_handler(CommandHandler("commands", cmd_commands))
-    app.add_handler(CommandHandler("features", cmd_features))
+    app.add_handler(_cmdh("start", cmd_start))
+    app.add_handler(_cmdh("help", cmd_help))
+    app.add_handler(_cmdh("commands", cmd_commands))
+    app.add_handler(_cmdh("features", cmd_features))
     app.add_handler(CallbackQueryHandler(on_solver_callback, pattern=r"^solve:"))
     app.add_handler(CallbackQueryHandler(on_genquiz_callback, pattern=r"^genquiz:"))
-    app.add_handler(CommandHandler("ask", cmd_ask))
-    app.add_handler(CommandHandler("scanhelp", cmd_scanhelp))
-    app.add_handler(CommandHandler("vision_on", cmd_vision_on))
-    app.add_handler(CommandHandler("vision_off", cmd_vision_off))
-    app.add_handler(CommandHandler("solve_on", cmd_solve_on))
-    app.add_handler(CommandHandler("solve_off", cmd_solve_off))
-    app.add_handler(CommandHandler("explain_on", cmd_explain_on))
-    app.add_handler(CommandHandler("explain_off", cmd_explain_off))
+    app.add_handler(_cmdh("ask", cmd_ask))
+    app.add_handler(_cmdh("scanhelp", cmd_scanhelp))
+    app.add_handler(_cmdh("vision_on", cmd_vision_on))
+    app.add_handler(_cmdh("vision_off", cmd_vision_off))
+    app.add_handler(_cmdh("solve_on", cmd_solve_on))
+    app.add_handler(_cmdh("solve_off", cmd_solve_off))
+    app.add_handler(_cmdh("explain_on", cmd_explain_on))
+    app.add_handler(_cmdh("explain_off", cmd_explain_off))
 
     # Owner only
-    app.add_handler(CommandHandler("quizprefix", cmd_quizprefix))
-    app.add_handler(CommandHandler("quizlink", cmd_quizlink))
-    app.add_handler(CommandHandler("addadmin", cmd_addadmin))
-    app.add_handler(CommandHandler("removeadmin", cmd_removeadmin))
-    app.add_handler(CommandHandler("grantall", cmd_grantall))
-    app.add_handler(CommandHandler("revokeall", cmd_revokeall))
-    app.add_handler(CommandHandler("grantvision", cmd_grantvision))
-    app.add_handler(CommandHandler("revokevision", cmd_revokevision))
+    app.add_handler(_cmdh("quizprefix", cmd_quizprefix))
+    app.add_handler(_cmdh("quizlink", cmd_quizlink))
+    app.add_handler(_cmdh("addadmin", cmd_addadmin))
+    app.add_handler(_cmdh("removeadmin", cmd_removeadmin))
+    app.add_handler(_cmdh("grantall", cmd_grantall))
+    app.add_handler(_cmdh("revokeall", cmd_revokeall))
+    app.add_handler(_cmdh("grantvision", cmd_grantvision))
+    app.add_handler(_cmdh("revokevision", cmd_revokevision))
 
     # Owner dashboard
-    app.add_handler(CommandHandler("ownerstats", cmd_ownerstats))
-    app.add_handler(CommandHandler("users", cmd_users))
+    app.add_handler(_cmdh("ownerstats", cmd_ownerstats))
+    app.add_handler(_cmdh("users", cmd_users))
 
     # Admin/Owner
-    app.add_handler(CommandHandler("filter", cmd_filter))
-    app.add_handler(CommandHandler("done", cmd_done))
-    app.add_handler(CommandHandler("clear", cmd_clear))
+    app.add_handler(_cmdh("filter", cmd_filter))
+    app.add_handler(_cmdh("done", cmd_done))
+    app.add_handler(_cmdh("clear", cmd_clear))
 
-    app.add_handler(CommandHandler("addchannel", cmd_addchannel))
-    app.add_handler(CommandHandler("listchannels", cmd_listchannels))
-    app.add_handler(CommandHandler("removechannel", cmd_removechannel))
-    app.add_handler(CommandHandler("setprefix", cmd_setprefix))
-    app.add_handler(CommandHandler("setexplink", cmd_setexplink))
-    app.add_handler(CommandHandler("post", cmd_post))
+    app.add_handler(_cmdh("addchannel", cmd_addchannel))
+    app.add_handler(_cmdh("listchannels", cmd_listchannels))
+    app.add_handler(_cmdh("removechannel", cmd_removechannel))
+    app.add_handler(_cmdh("setprefix", cmd_setprefix))
+    app.add_handler(_cmdh("setexplink", cmd_setexplink))
+    app.add_handler(_cmdh("post", cmd_post))
 
-    app.add_handler(CommandHandler("broadcast", cmd_broadcast))
-    app.add_handler(CommandHandler("adminpanel", cmd_adminpanel))
+    app.add_handler(_cmdh("broadcast", cmd_broadcast))
+    app.add_handler(_cmdh("adminpanel", cmd_adminpanel))
 
-    app.add_handler(CommandHandler("reply", cmd_reply))
-    app.add_handler(CommandHandler("close", cmd_close))
+    app.add_handler(_cmdh("reply", cmd_reply))
+    app.add_handler(_cmdh("close", cmd_close))
 
-    app.add_handler(CommandHandler("ban", cmd_ban))
-    app.add_handler(CommandHandler("unban", cmd_unban))
-    app.add_handler(CommandHandler("banned", cmd_banned))
+    app.add_handler(_cmdh("ban", cmd_ban))
+    app.add_handler(_cmdh("unban", cmd_unban))
+    app.add_handler(_cmdh("banned", cmd_banned))
 
-    app.add_handler(CommandHandler("private_send", cmd_private_send))
-    app.add_handler(CommandHandler("send_private", cmd_private_send))
+    app.add_handler(_cmdh("private_send", cmd_private_send))
+    app.add_handler(_cmdh("send_private", cmd_private_send))
 
     # Polls, Images & admin parsing (silent for non-admins)
     app.add_handler(MessageHandler(filters.POLL, handle_poll))
@@ -5728,58 +5738,58 @@ def build_app() -> Application:
     except Exception:
         pass
     app = builder.build()
-    app.add_handler(CommandHandler("start", cmd_start))
-    app.add_handler(CommandHandler("help", cmd_help))
-    app.add_handler(CommandHandler("commands", cmd_commands))
-    app.add_handler(CommandHandler("features", cmd_features))
+    app.add_handler(_cmdh("start", cmd_start))
+    app.add_handler(_cmdh("help", cmd_help))
+    app.add_handler(_cmdh("commands", cmd_commands))
+    app.add_handler(_cmdh("features", cmd_features))
     app.add_handler(CallbackQueryHandler(on_solver_callback, pattern=r"^solve:"))
     app.add_handler(CallbackQueryHandler(on_genquiz_callback, pattern=r"^genquiz:"))
     app.add_handler(CallbackQueryHandler(on_emoji_quiz_callback, pattern=r"^eq:"))
     app.add_handler(CallbackQueryHandler(on_required_verify_callback, pattern=r"^req:verify$"))
-    app.add_handler(CommandHandler("ask", cmd_ask))
-    app.add_handler(CommandHandler("scanhelp", cmd_scanhelp))
-    app.add_handler(CommandHandler("vision_on", cmd_vision_on))
-    app.add_handler(CommandHandler("vision_off", cmd_vision_off))
-    app.add_handler(CommandHandler("solve_on", cmd_solve_on))
-    app.add_handler(CommandHandler("solve_off", cmd_solve_off))
-    app.add_handler(CommandHandler("himusai_on", cmd_himusai_on))
-    app.add_handler(CommandHandler("himusai_off", cmd_himusai_off))
-    app.add_handler(CommandHandler("probaho_on", cmd_probaho_on))
-    app.add_handler(CommandHandler("probaho_off", cmd_probaho_off))
-    app.add_handler(CommandHandler("explain_on", cmd_explain_on))
-    app.add_handler(CommandHandler("explain_off", cmd_explain_off))
-    app.add_handler(CommandHandler("quizprefix", cmd_quizprefix))
-    app.add_handler(CommandHandler("quizlink", cmd_quizlink))
-    app.add_handler(CommandHandler("addadmin", cmd_addadmin))
-    app.add_handler(CommandHandler("removeadmin", cmd_removeadmin))
-    app.add_handler(CommandHandler("grantall", cmd_grantall))
-    app.add_handler(CommandHandler("revokeall", cmd_revokeall))
-    app.add_handler(CommandHandler("grantvision", cmd_grantvision))
-    app.add_handler(CommandHandler("revokevision", cmd_revokevision))
-    app.add_handler(CommandHandler("addrequired", cmd_addrequired))
-    app.add_handler(CommandHandler("delrequired", cmd_delrequired))
-    app.add_handler(CommandHandler("listrequired", cmd_listrequired))
-    app.add_handler(CommandHandler("ownerstats", cmd_ownerstats))
-    app.add_handler(CommandHandler("users", cmd_users))
-    app.add_handler(CommandHandler("filter", cmd_filter))
-    app.add_handler(CommandHandler("done", cmd_done))
-    app.add_handler(CommandHandler("clear", cmd_clear))
-    app.add_handler(CommandHandler("addchannel", cmd_addchannel))
-    app.add_handler(CommandHandler("listchannels", cmd_listchannels))
-    app.add_handler(CommandHandler("removechannel", cmd_removechannel))
-    app.add_handler(CommandHandler("setprefix", cmd_setprefix))
-    app.add_handler(CommandHandler("setexplink", cmd_setexplink))
-    app.add_handler(CommandHandler("post", cmd_post))
-    app.add_handler(CommandHandler("postemoji", cmd_postemoji))
-    app.add_handler(CommandHandler("broadcast", cmd_broadcast))
-    app.add_handler(CommandHandler("adminpanel", cmd_adminpanel))
-    app.add_handler(CommandHandler("reply", cmd_reply))
-    app.add_handler(CommandHandler("close", cmd_close))
-    app.add_handler(CommandHandler("ban", cmd_ban))
-    app.add_handler(CommandHandler("unban", cmd_unban))
-    app.add_handler(CommandHandler("banned", cmd_banned))
-    app.add_handler(CommandHandler("private_send", cmd_private_send))
-    app.add_handler(CommandHandler("send_private", cmd_private_send))
+    app.add_handler(_cmdh("ask", cmd_ask))
+    app.add_handler(_cmdh("scanhelp", cmd_scanhelp))
+    app.add_handler(_cmdh("vision_on", cmd_vision_on))
+    app.add_handler(_cmdh("vision_off", cmd_vision_off))
+    app.add_handler(_cmdh("solve_on", cmd_solve_on))
+    app.add_handler(_cmdh("solve_off", cmd_solve_off))
+    app.add_handler(_cmdh("himusai_on", cmd_himusai_on))
+    app.add_handler(_cmdh("himusai_off", cmd_himusai_off))
+    app.add_handler(_cmdh("probaho_on", cmd_probaho_on))
+    app.add_handler(_cmdh("probaho_off", cmd_probaho_off))
+    app.add_handler(_cmdh("explain_on", cmd_explain_on))
+    app.add_handler(_cmdh("explain_off", cmd_explain_off))
+    app.add_handler(_cmdh("quizprefix", cmd_quizprefix))
+    app.add_handler(_cmdh("quizlink", cmd_quizlink))
+    app.add_handler(_cmdh("addadmin", cmd_addadmin))
+    app.add_handler(_cmdh("removeadmin", cmd_removeadmin))
+    app.add_handler(_cmdh("grantall", cmd_grantall))
+    app.add_handler(_cmdh("revokeall", cmd_revokeall))
+    app.add_handler(_cmdh("grantvision", cmd_grantvision))
+    app.add_handler(_cmdh("revokevision", cmd_revokevision))
+    app.add_handler(_cmdh("addrequired", cmd_addrequired))
+    app.add_handler(_cmdh("delrequired", cmd_delrequired))
+    app.add_handler(_cmdh("listrequired", cmd_listrequired))
+    app.add_handler(_cmdh("ownerstats", cmd_ownerstats))
+    app.add_handler(_cmdh("users", cmd_users))
+    app.add_handler(_cmdh("filter", cmd_filter))
+    app.add_handler(_cmdh("done", cmd_done))
+    app.add_handler(_cmdh("clear", cmd_clear))
+    app.add_handler(_cmdh("addchannel", cmd_addchannel))
+    app.add_handler(_cmdh("listchannels", cmd_listchannels))
+    app.add_handler(_cmdh("removechannel", cmd_removechannel))
+    app.add_handler(_cmdh("setprefix", cmd_setprefix))
+    app.add_handler(_cmdh("setexplink", cmd_setexplink))
+    app.add_handler(_cmdh("post", cmd_post))
+    app.add_handler(_cmdh("postemoji", cmd_postemoji))
+    app.add_handler(_cmdh("broadcast", cmd_broadcast))
+    app.add_handler(_cmdh("adminpanel", cmd_adminpanel))
+    app.add_handler(_cmdh("reply", cmd_reply))
+    app.add_handler(_cmdh("close", cmd_close))
+    app.add_handler(_cmdh("ban", cmd_ban))
+    app.add_handler(_cmdh("unban", cmd_unban))
+    app.add_handler(_cmdh("banned", cmd_banned))
+    app.add_handler(_cmdh("private_send", cmd_private_send))
+    app.add_handler(_cmdh("send_private", cmd_private_send))
     app.add_handler(MessageHandler(filters.POLL, handle_poll))
     app.add_handler(MessageHandler(filters.POLL, handle_user_poll_solver), group=1)
     app.add_handler(MessageHandler(filters.PHOTO, handle_image))
@@ -8067,59 +8077,59 @@ def build_app() -> Application:
     except Exception:
         pass
     app = builder.build()
-    app.add_handler(CommandHandler("start", cmd_start))
-    app.add_handler(CommandHandler("help", cmd_help))
-    app.add_handler(CommandHandler("commands", cmd_commands))
-    app.add_handler(CommandHandler("features", cmd_features))
+    app.add_handler(_cmdh("start", cmd_start))
+    app.add_handler(_cmdh("help", cmd_help))
+    app.add_handler(_cmdh("commands", cmd_commands))
+    app.add_handler(_cmdh("features", cmd_features))
     app.add_handler(CallbackQueryHandler(on_solver_callback, pattern=r"^solve:"))
     app.add_handler(CallbackQueryHandler(on_genquiz_callback, pattern=r"^genquiz:"))
     app.add_handler(CallbackQueryHandler(on_emoji_quiz_callback, pattern=r"^eq:"))
     app.add_handler(CallbackQueryHandler(on_required_verify_callback, pattern=r"^req:verify$"))
-    app.add_handler(CommandHandler("ask", cmd_ask))
-    app.add_handler(CommandHandler("scanhelp", cmd_scanhelp))
-    app.add_handler(CommandHandler("vision_on", cmd_vision_on))
-    app.add_handler(CommandHandler("vision_off", cmd_vision_off))
-    app.add_handler(CommandHandler("solve_on", cmd_solve_on))
-    app.add_handler(CommandHandler("solve_off", cmd_solve_off))
-    app.add_handler(CommandHandler("himusai_on", cmd_himusai_on))
-    app.add_handler(CommandHandler("himusai_off", cmd_himusai_off))
-    app.add_handler(CommandHandler("probaho_on", cmd_probaho_on))
-    app.add_handler(CommandHandler("probaho_off", cmd_probaho_off))
-    app.add_handler(CommandHandler("explain_on", cmd_explain_on))
-    app.add_handler(CommandHandler("explain_off", cmd_explain_off))
-    app.add_handler(CommandHandler("quizprefix", cmd_quizprefix))
-    app.add_handler(CommandHandler("quizlink", cmd_quizlink))
-    app.add_handler(CommandHandler("addadmin", cmd_addadmin))
-    app.add_handler(CommandHandler("removeadmin", cmd_removeadmin))
-    app.add_handler(CommandHandler("grantall", cmd_grantall))
-    app.add_handler(CommandHandler("revokeall", cmd_revokeall))
-    app.add_handler(CommandHandler("grantvision", cmd_grantvision))
-    app.add_handler(CommandHandler("revokevision", cmd_revokevision))
-    app.add_handler(CommandHandler("addrequired", cmd_addrequired))
-    app.add_handler(CommandHandler("delrequired", cmd_delrequired))
-    app.add_handler(CommandHandler("listrequired", cmd_listrequired))
-    app.add_handler(CommandHandler("ownerstats", cmd_ownerstats))
-    app.add_handler(CommandHandler("users", cmd_users))
-    app.add_handler(CommandHandler("usersd", cmd_usersd))
-    app.add_handler(CommandHandler("filter", cmd_filter))
-    app.add_handler(CommandHandler("done", cmd_done))
-    app.add_handler(CommandHandler("clear", cmd_clear))
-    app.add_handler(CommandHandler("addchannel", cmd_addchannel))
-    app.add_handler(CommandHandler("listchannels", cmd_listchannels))
-    app.add_handler(CommandHandler("removechannel", cmd_removechannel))
-    app.add_handler(CommandHandler("setprefix", cmd_setprefix))
-    app.add_handler(CommandHandler("setexplink", cmd_setexplink))
-    app.add_handler(CommandHandler("post", cmd_post))
-    app.add_handler(CommandHandler("postemoji", cmd_postemoji))
-    app.add_handler(CommandHandler("broadcast", cmd_broadcast))
-    app.add_handler(CommandHandler("adminpanel", cmd_adminpanel))
-    app.add_handler(CommandHandler("reply", cmd_reply))
-    app.add_handler(CommandHandler("close", cmd_close))
-    app.add_handler(CommandHandler("ban", cmd_ban))
-    app.add_handler(CommandHandler("unban", cmd_unban))
-    app.add_handler(CommandHandler("banned", cmd_banned))
-    app.add_handler(CommandHandler("private_send", cmd_private_send))
-    app.add_handler(CommandHandler("send_private", cmd_private_send))
+    app.add_handler(_cmdh("ask", cmd_ask))
+    app.add_handler(_cmdh("scanhelp", cmd_scanhelp))
+    app.add_handler(_cmdh("vision_on", cmd_vision_on))
+    app.add_handler(_cmdh("vision_off", cmd_vision_off))
+    app.add_handler(_cmdh("solve_on", cmd_solve_on))
+    app.add_handler(_cmdh("solve_off", cmd_solve_off))
+    app.add_handler(_cmdh("himusai_on", cmd_himusai_on))
+    app.add_handler(_cmdh("himusai_off", cmd_himusai_off))
+    app.add_handler(_cmdh("probaho_on", cmd_probaho_on))
+    app.add_handler(_cmdh("probaho_off", cmd_probaho_off))
+    app.add_handler(_cmdh("explain_on", cmd_explain_on))
+    app.add_handler(_cmdh("explain_off", cmd_explain_off))
+    app.add_handler(_cmdh("quizprefix", cmd_quizprefix))
+    app.add_handler(_cmdh("quizlink", cmd_quizlink))
+    app.add_handler(_cmdh("addadmin", cmd_addadmin))
+    app.add_handler(_cmdh("removeadmin", cmd_removeadmin))
+    app.add_handler(_cmdh("grantall", cmd_grantall))
+    app.add_handler(_cmdh("revokeall", cmd_revokeall))
+    app.add_handler(_cmdh("grantvision", cmd_grantvision))
+    app.add_handler(_cmdh("revokevision", cmd_revokevision))
+    app.add_handler(_cmdh("addrequired", cmd_addrequired))
+    app.add_handler(_cmdh("delrequired", cmd_delrequired))
+    app.add_handler(_cmdh("listrequired", cmd_listrequired))
+    app.add_handler(_cmdh("ownerstats", cmd_ownerstats))
+    app.add_handler(_cmdh("users", cmd_users))
+    app.add_handler(_cmdh("usersd", cmd_usersd))
+    app.add_handler(_cmdh("filter", cmd_filter))
+    app.add_handler(_cmdh("done", cmd_done))
+    app.add_handler(_cmdh("clear", cmd_clear))
+    app.add_handler(_cmdh("addchannel", cmd_addchannel))
+    app.add_handler(_cmdh("listchannels", cmd_listchannels))
+    app.add_handler(_cmdh("removechannel", cmd_removechannel))
+    app.add_handler(_cmdh("setprefix", cmd_setprefix))
+    app.add_handler(_cmdh("setexplink", cmd_setexplink))
+    app.add_handler(_cmdh("post", cmd_post))
+    app.add_handler(_cmdh("postemoji", cmd_postemoji))
+    app.add_handler(_cmdh("broadcast", cmd_broadcast))
+    app.add_handler(_cmdh("adminpanel", cmd_adminpanel))
+    app.add_handler(_cmdh("reply", cmd_reply))
+    app.add_handler(_cmdh("close", cmd_close))
+    app.add_handler(_cmdh("ban", cmd_ban))
+    app.add_handler(_cmdh("unban", cmd_unban))
+    app.add_handler(_cmdh("banned", cmd_banned))
+    app.add_handler(_cmdh("private_send", cmd_private_send))
+    app.add_handler(_cmdh("send_private", cmd_private_send))
     app.add_handler(MessageHandler(filters.POLL, handle_poll))
     app.add_handler(MessageHandler(filters.POLL, handle_user_poll_solver), group=1)
     app.add_handler(MessageHandler(filters.PHOTO, handle_image))
@@ -8396,9 +8406,9 @@ _old_build_app = build_app
 
 def build_app() -> Application:
     app = _old_build_app()
-    app.add_handler(CommandHandler("emojipost", cmd_postemoji))
-    app.add_handler(CommandHandler("buffercount", cmd_buffercount))
-    app.add_handler(CommandHandler("imgreact", cmd_imgreact))
+    app.add_handler(_cmdh("emojipost", cmd_postemoji))
+    app.add_handler(_cmdh("buffercount", cmd_buffercount))
+    app.add_handler(_cmdh("imgreact", cmd_imgreact))
     return app
 
 
@@ -9060,57 +9070,59 @@ async def cmd_sh(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     reply = update.message.reply_to_message
     inline = " ".join(context.args).strip()
-    prompt = inline
-    response_text = ""
-    model_used = "Gemini"
 
-    try:
-        if reply and getattr(reply, 'poll', None):
-            qtext, options, qexpl = _poll_text_for_sh(reply.poll)
-            ask_text = inline or "Solve this quiz and explain briefly."
-            try:
-                result = await _run_blocking(_role_of(uid), gemini_solve_mcq_json, qtext, options, timeout=40)
-                ans = int(result.get("answer", 0) or 0)
-                expl = clean_latex(str(result.get("explanation", "") or "").strip())
-            except Exception:
-                model_used = "Perplexity"
-                result = await _run_blocking(_role_of(uid), perplexity_solve_mcq_json, qtext, options, timeout=40)
-                ans = int(result.get("answer", 0) or 0)
-                expl = clean_latex(str(result.get("explanation", "") or "").strip())
-            answer_line = f"✅ Answer: {_safe_letter(ans)}" if ans > 0 else "⚠️ Answer could not be determined confidently."
-            extra = f"\n\nQuiz note: {h(qexpl)}" if qexpl else ""
-            response_text = f"<b>{h(model_used)}</b>\n{h(answer_line)}\n\n{h(expl)}{extra}".strip()
-        else:
-            if reply:
-                base = (reply.text or reply.caption or "").strip()
-                if inline and base:
-                    prompt = f"Context:\n{base}\n\nQuestion:\n{inline}"
-                elif base:
-                    prompt = base
-            if not (prompt or "").strip():
-                await _dm_text(context, uid, ui_box_html("Usage", "Use <code>/sh your question</code> or reply to a message/quiz with <code>/sh</code>.", emoji="ℹ️"))
-                with contextlib.suppress(Exception):
-                    await update.message.delete()
-                return
-            try:
-                answer = await _run_blocking(_role_of(uid), gemini_solve_text, prompt, timeout=45)
-            except Exception:
-                model_used = "Perplexity"
-                try:
-                    answer = await _run_blocking(_role_of(uid), perplexity_solve_text, prompt, timeout=45)
-                except Exception:
-                    answer = "দুঃখিত, এই মুহূর্তে AI response পাওয়া যাচ্ছে না। পরে আবার চেষ্টা করুন।"
-            response_text = f"<b>{h(model_used)}</b>\n{h(answer)}"
-    except Exception:
-        response_text = "<b>AI</b>\nদুঃখিত, এই মুহূর্তে response পাওয়া যাচ্ছে না। পরে আবার চেষ্টা করুন।"
+    token = _make_token()
+    store = _pending_store(context)
+    preview = inline or "Solve this message/quiz"
 
+    if reply and getattr(reply, 'poll', None):
+        qtext, options, qexpl = _poll_text_for_sh(reply.poll)
+        official_ans = 0
+        with contextlib.suppress(Exception):
+            if getattr(reply.poll, 'type', '') == 'quiz' and getattr(reply.poll, 'correct_option_id', None) is not None:
+                official_ans = int(reply.poll.correct_option_id) + 1
+        store[token] = {
+            "uid": uid,
+            "chat_id": chat_id,
+            "kind": "poll",
+            "payload": {
+                "question": qtext,
+                "options": options,
+                "official_ans": official_ans,
+                "official_expl": qexpl,
+            },
+        }
+        preview = qtext or preview
+    else:
+        prompt = inline
+        if reply:
+            base = (reply.text or reply.caption or "").strip()
+            if inline and base:
+                prompt = f"Context:\n{base}\n\nQuestion:\n{inline}"
+            elif base:
+                prompt = base
+        if not (prompt or "").strip():
+            await _dm_text(context, uid, ui_box_html("Usage", "Use <code>/sh your question</code> or reply to a message/quiz with <code>/sh</code>.", emoji="ℹ️"))
+            with contextlib.suppress(Exception):
+                await update.message.delete()
+            return
+        store[token] = {
+            "uid": uid,
+            "chat_id": chat_id,
+            "kind": "text",
+            "payload": {"text": prompt},
+        }
+        preview = prompt
+
+    kb = _solver_picker_kb(token)
     sent = await context.bot.send_message(
         chat_id=chat_id,
-        text=response_text,
+        text=ui_box_html("Which AI model?", f"<code>{h(preview[:100])}</code>", emoji="🧠"),
         parse_mode=ParseMode.HTML,
+        disable_web_page_preview=True,
+        reply_markup=kb,
         reply_to_message_id=(reply.message_id if reply else update.message.message_id),
         allow_sending_without_reply=True,
-        disable_web_page_preview=True,
     )
     asyncio.create_task(_auto_delete_after(context.bot, chat_id, [sent.message_id], 300))
 
@@ -9251,62 +9263,62 @@ def build_app() -> Application:
     app.add_handler(CallbackQueryHandler(on_tutorial_callback, pattern=r"^tutorial:show$"))
 
     # Private public commands
-    app.add_handler(CommandHandler("start", cmd_start, filters=filters.ChatType.PRIVATE))
-    app.add_handler(CommandHandler("help", cmd_help, filters=filters.ChatType.PRIVATE))
-    app.add_handler(CommandHandler("commands", cmd_commands, filters=filters.ChatType.PRIVATE))
-    app.add_handler(CommandHandler("features", cmd_features, filters=filters.ChatType.PRIVATE))
-    app.add_handler(CommandHandler("ask", cmd_ask, filters=filters.ChatType.PRIVATE))
-    app.add_handler(CommandHandler("scanhelp", cmd_scanhelp, filters=filters.ChatType.PRIVATE))
-    app.add_handler(CommandHandler("vision_on", cmd_vision_on, filters=filters.ChatType.PRIVATE))
-    app.add_handler(CommandHandler("vision_off", cmd_vision_off, filters=filters.ChatType.PRIVATE))
-    app.add_handler(CommandHandler("solve_on", cmd_solve_on, filters=filters.ChatType.PRIVATE))
-    app.add_handler(CommandHandler("solve_off", cmd_solve_off, filters=filters.ChatType.PRIVATE))
-    app.add_handler(CommandHandler("explain_on", cmd_explain_on, filters=filters.ChatType.PRIVATE))
-    app.add_handler(CommandHandler("explain_off", cmd_explain_off, filters=filters.ChatType.PRIVATE))
+    app.add_handler(_cmdh("start", cmd_start, filters=filters.ChatType.PRIVATE))
+    app.add_handler(_cmdh("help", cmd_help, filters=filters.ChatType.PRIVATE))
+    app.add_handler(_cmdh("commands", cmd_commands, filters=filters.ChatType.PRIVATE))
+    app.add_handler(_cmdh("features", cmd_features, filters=filters.ChatType.PRIVATE))
+    app.add_handler(_cmdh("ask", cmd_ask, filters=filters.ChatType.PRIVATE))
+    app.add_handler(_cmdh("scanhelp", cmd_scanhelp, filters=filters.ChatType.PRIVATE))
+    app.add_handler(_cmdh("vision_on", cmd_vision_on, filters=filters.ChatType.PRIVATE))
+    app.add_handler(_cmdh("vision_off", cmd_vision_off, filters=filters.ChatType.PRIVATE))
+    app.add_handler(_cmdh("solve_on", cmd_solve_on, filters=filters.ChatType.PRIVATE))
+    app.add_handler(_cmdh("solve_off", cmd_solve_off, filters=filters.ChatType.PRIVATE))
+    app.add_handler(_cmdh("explain_on", cmd_explain_on, filters=filters.ChatType.PRIVATE))
+    app.add_handler(_cmdh("explain_off", cmd_explain_off, filters=filters.ChatType.PRIVATE))
 
     # Owner/private
-    app.add_handler(CommandHandler("quizprefix", cmd_quizprefix, filters=filters.ChatType.PRIVATE))
-    app.add_handler(CommandHandler("quizlink", cmd_quizlink, filters=filters.ChatType.PRIVATE))
-    app.add_handler(CommandHandler("addadmin", cmd_addadmin, filters=filters.ChatType.PRIVATE))
-    app.add_handler(CommandHandler("removeadmin", cmd_removeadmin, filters=filters.ChatType.PRIVATE))
-    app.add_handler(CommandHandler("grantall", cmd_grantall, filters=filters.ChatType.PRIVATE))
-    app.add_handler(CommandHandler("revokeall", cmd_revokeall, filters=filters.ChatType.PRIVATE))
-    app.add_handler(CommandHandler("grantvision", cmd_grantvision, filters=filters.ChatType.PRIVATE))
-    app.add_handler(CommandHandler("revokevision", cmd_revokevision, filters=filters.ChatType.PRIVATE))
-    app.add_handler(CommandHandler("ownerstats", cmd_ownerstats, filters=filters.ChatType.PRIVATE))
-    app.add_handler(CommandHandler("users", cmd_users, filters=filters.ChatType.PRIVATE))
-    app.add_handler(CommandHandler("maintenance_on", cmd_maintenance_on, filters=filters.ChatType.PRIVATE))
-    app.add_handler(CommandHandler("maintenance_off", cmd_maintenance_off, filters=filters.ChatType.PRIVATE))
+    app.add_handler(_cmdh("quizprefix", cmd_quizprefix, filters=filters.ChatType.PRIVATE))
+    app.add_handler(_cmdh("quizlink", cmd_quizlink, filters=filters.ChatType.PRIVATE))
+    app.add_handler(_cmdh("addadmin", cmd_addadmin, filters=filters.ChatType.PRIVATE))
+    app.add_handler(_cmdh("removeadmin", cmd_removeadmin, filters=filters.ChatType.PRIVATE))
+    app.add_handler(_cmdh("grantall", cmd_grantall, filters=filters.ChatType.PRIVATE))
+    app.add_handler(_cmdh("revokeall", cmd_revokeall, filters=filters.ChatType.PRIVATE))
+    app.add_handler(_cmdh("grantvision", cmd_grantvision, filters=filters.ChatType.PRIVATE))
+    app.add_handler(_cmdh("revokevision", cmd_revokevision, filters=filters.ChatType.PRIVATE))
+    app.add_handler(_cmdh("ownerstats", cmd_ownerstats, filters=filters.ChatType.PRIVATE))
+    app.add_handler(_cmdh("users", cmd_users, filters=filters.ChatType.PRIVATE))
+    app.add_handler(_cmdh("maintenance_on", cmd_maintenance_on, filters=filters.ChatType.PRIVATE))
+    app.add_handler(_cmdh("maintenance_off", cmd_maintenance_off, filters=filters.ChatType.PRIVATE))
 
     # Admin/private
-    app.add_handler(CommandHandler("filter", cmd_filter, filters=filters.ChatType.PRIVATE))
-    app.add_handler(CommandHandler("done", cmd_done, filters=filters.ChatType.PRIVATE))
-    app.add_handler(CommandHandler("clear", cmd_clear, filters=filters.ChatType.PRIVATE))
-    app.add_handler(CommandHandler("buffercount", cmd_buffercount, filters=filters.ChatType.PRIVATE))
-    app.add_handler(CommandHandler("addchannel", cmd_addchannel, filters=filters.ChatType.PRIVATE))
-    app.add_handler(CommandHandler("listchannels", cmd_listchannels, filters=filters.ChatType.PRIVATE))
-    app.add_handler(CommandHandler("removechannel", cmd_removechannel, filters=filters.ChatType.PRIVATE))
-    app.add_handler(CommandHandler("setprefix", cmd_setprefix, filters=filters.ChatType.PRIVATE))
-    app.add_handler(CommandHandler("setexplink", cmd_setexplink, filters=filters.ChatType.PRIVATE))
-    app.add_handler(CommandHandler("post", cmd_post, filters=filters.ChatType.PRIVATE))
-    app.add_handler(CommandHandler("postemoji", cmd_postemoji, filters=filters.ChatType.PRIVATE))
-    app.add_handler(CommandHandler("emojipost", cmd_postemoji, filters=filters.ChatType.PRIVATE))
-    app.add_handler(CommandHandler("imgreact", cmd_imgreact, filters=filters.ChatType.PRIVATE))
-    app.add_handler(CommandHandler("broadcast", cmd_broadcast, filters=filters.ChatType.PRIVATE))
-    app.add_handler(CommandHandler("adminpanel", cmd_adminpanel, filters=filters.ChatType.PRIVATE))
-    app.add_handler(CommandHandler("reply", cmd_reply, filters=filters.ChatType.PRIVATE))
-    app.add_handler(CommandHandler("close", cmd_close, filters=filters.ChatType.PRIVATE))
-    app.add_handler(CommandHandler("ban", cmd_ban, filters=filters.ChatType.PRIVATE))
-    app.add_handler(CommandHandler("unban", cmd_unban, filters=filters.ChatType.PRIVATE))
-    app.add_handler(CommandHandler("banned", cmd_banned, filters=filters.ChatType.PRIVATE))
-    app.add_handler(CommandHandler("private_send", cmd_private_send, filters=filters.ChatType.PRIVATE))
-    app.add_handler(CommandHandler("send_private", cmd_private_send, filters=filters.ChatType.PRIVATE))
-    app.add_handler(CommandHandler("usersd", cmd_usersd, filters=filters.ChatType.PRIVATE))
-    app.add_handler(CommandHandler("addrequired", cmd_addrequired, filters=filters.ChatType.PRIVATE))
-    app.add_handler(CommandHandler("delrequired", cmd_delrequired, filters=filters.ChatType.PRIVATE))
-    app.add_handler(CommandHandler("listrequired", cmd_listrequired, filters=filters.ChatType.PRIVATE))
-    app.add_handler(CommandHandler("himusai_on", cmd_himusai_on, filters=filters.ChatType.PRIVATE))
-    app.add_handler(CommandHandler("himusai_off", cmd_himusai_off, filters=filters.ChatType.PRIVATE))
+    app.add_handler(_cmdh("filter", cmd_filter, filters=filters.ChatType.PRIVATE))
+    app.add_handler(_cmdh("done", cmd_done, filters=filters.ChatType.PRIVATE))
+    app.add_handler(_cmdh("clear", cmd_clear, filters=filters.ChatType.PRIVATE))
+    app.add_handler(_cmdh("buffercount", cmd_buffercount, filters=filters.ChatType.PRIVATE))
+    app.add_handler(_cmdh("addchannel", cmd_addchannel, filters=filters.ChatType.PRIVATE))
+    app.add_handler(_cmdh("listchannels", cmd_listchannels, filters=filters.ChatType.PRIVATE))
+    app.add_handler(_cmdh("removechannel", cmd_removechannel, filters=filters.ChatType.PRIVATE))
+    app.add_handler(_cmdh("setprefix", cmd_setprefix, filters=filters.ChatType.PRIVATE))
+    app.add_handler(_cmdh("setexplink", cmd_setexplink, filters=filters.ChatType.PRIVATE))
+    app.add_handler(_cmdh("post", cmd_post, filters=filters.ChatType.PRIVATE))
+    app.add_handler(_cmdh("postemoji", cmd_postemoji, filters=filters.ChatType.PRIVATE))
+    app.add_handler(_cmdh("emojipost", cmd_postemoji, filters=filters.ChatType.PRIVATE))
+    app.add_handler(_cmdh("imgreact", cmd_imgreact, filters=filters.ChatType.PRIVATE))
+    app.add_handler(_cmdh("broadcast", cmd_broadcast, filters=filters.ChatType.PRIVATE))
+    app.add_handler(_cmdh("adminpanel", cmd_adminpanel, filters=filters.ChatType.PRIVATE))
+    app.add_handler(_cmdh("reply", cmd_reply, filters=filters.ChatType.PRIVATE))
+    app.add_handler(_cmdh("close", cmd_close, filters=filters.ChatType.PRIVATE))
+    app.add_handler(_cmdh("ban", cmd_ban, filters=filters.ChatType.PRIVATE))
+    app.add_handler(_cmdh("unban", cmd_unban, filters=filters.ChatType.PRIVATE))
+    app.add_handler(_cmdh("banned", cmd_banned, filters=filters.ChatType.PRIVATE))
+    app.add_handler(_cmdh("private_send", cmd_private_send, filters=filters.ChatType.PRIVATE))
+    app.add_handler(_cmdh("send_private", cmd_private_send, filters=filters.ChatType.PRIVATE))
+    app.add_handler(_cmdh("usersd", cmd_usersd, filters=filters.ChatType.PRIVATE))
+    app.add_handler(_cmdh("addrequired", cmd_addrequired, filters=filters.ChatType.PRIVATE))
+    app.add_handler(_cmdh("delrequired", cmd_delrequired, filters=filters.ChatType.PRIVATE))
+    app.add_handler(_cmdh("listrequired", cmd_listrequired, filters=filters.ChatType.PRIVATE))
+    app.add_handler(_cmdh("himusai_on", cmd_himusai_on, filters=filters.ChatType.PRIVATE))
+    app.add_handler(_cmdh("himusai_off", cmd_himusai_off, filters=filters.ChatType.PRIVATE))
 
     # Private message handlers only
     app.add_handler(MessageHandler(_private_filter(filters.POLL), handle_poll))
@@ -9317,11 +9329,11 @@ def build_app() -> Application:
     app.add_handler(MessageHandler(_private_filter(filters.TEXT & (~filters.COMMAND)), handle_user_text_unusual), group=1)
 
     # Group-only handlers
-    app.add_handler(CommandHandler("probaho_on", cmd_probaho_on, filters=(filters.ChatType.GROUP | filters.ChatType.SUPERGROUP)))
-    app.add_handler(CommandHandler("probaho_off", cmd_probaho_off, filters=(filters.ChatType.GROUP | filters.ChatType.SUPERGROUP)))
-    app.add_handler(CommandHandler("sh", cmd_sh, filters=(filters.ChatType.GROUP | filters.ChatType.SUPERGROUP)))
-    app.add_handler(CommandHandler("porag", cmd_porag, filters=(filters.ChatType.GROUP | filters.ChatType.SUPERGROUP)))
-    app.add_handler(CommandHandler("tutorial", cmd_tutorial, filters=(filters.ChatType.GROUP | filters.ChatType.SUPERGROUP)))
+    app.add_handler(_cmdh("probaho_on", cmd_probaho_on, filters=(filters.ChatType.GROUP | filters.ChatType.SUPERGROUP)))
+    app.add_handler(_cmdh("probaho_off", cmd_probaho_off, filters=(filters.ChatType.GROUP | filters.ChatType.SUPERGROUP)))
+    app.add_handler(_cmdh("sh", cmd_sh, filters=(filters.ChatType.GROUP | filters.ChatType.SUPERGROUP)))
+    app.add_handler(_cmdh("porag", cmd_porag, filters=(filters.ChatType.GROUP | filters.ChatType.SUPERGROUP)))
+    app.add_handler(_cmdh("tutorial", cmd_tutorial, filters=(filters.ChatType.GROUP | filters.ChatType.SUPERGROUP)))
     app.add_handler(ChatMemberHandler(on_my_chat_member, chat_member_types=ChatMemberHandler.MY_CHAT_MEMBER))
 
     app.add_error_handler(on_error)
